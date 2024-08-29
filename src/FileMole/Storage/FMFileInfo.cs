@@ -2,15 +2,17 @@
 
 public class FMFileInfo
 {
-    public string Name { get; set; }
-    public string FullPath { get; set; }
-    public long Size { get; set; }
-    public DateTime CreationTime { get; set; }
-    public DateTime LastWriteTime { get; set; }
-    public DateTime LastAccessTime { get; set; }
-    public FileAttributes Attributes { get; set; }
+    public string Name { get; }
+    public string FullPath { get; }
+    public long Size { get; }
+    public DateTime CreationTime { get; }
+    public DateTime LastWriteTime { get; }
+    public DateTime LastAccessTime { get; }
+    public FileAttributes Attributes { get; }
+    public string? FileHash { get; set; }
+    public string? LastFileHash { get; }
 
-    public FMFileInfo(string name, string fullPath, long size, DateTime creationTime, DateTime lastWriteTime, DateTime lastAccessTime, FileAttributes attributes)
+    public FMFileInfo(string name, string fullPath, long size, DateTime creationTime, DateTime lastWriteTime, DateTime lastAccessTime, FileAttributes attributes, string? fileHash = null, string? lastFileHash = null)
     {
         Name = name;
         FullPath = fullPath;
@@ -19,12 +21,34 @@ public class FMFileInfo
         LastWriteTime = lastWriteTime;
         LastAccessTime = lastAccessTime;
         Attributes = attributes;
+        FileHash = fileHash;
+        LastFileHash = lastFileHash;
     }
 
-    // 필요에 따라 추가 메서드를 구현할 수 있습니다.
+    // Computed properties
     public bool IsReadOnly => (Attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly;
     public bool IsHidden => (Attributes & FileAttributes.Hidden) == FileAttributes.Hidden;
     public bool IsSystem => (Attributes & FileAttributes.System) == FileAttributes.System;
+
+    // Factory method to create FMFileInfo from System.IO.FileInfo
+    public static FMFileInfo FromFileInfo(FileInfo fileInfo)
+    {
+        return new FMFileInfo(
+            fileInfo.Name,
+            fileInfo.FullName,
+            fileInfo.Length,
+            fileInfo.CreationTime,
+            fileInfo.LastWriteTime,
+            fileInfo.LastAccessTime,
+            fileInfo.Attributes
+        );
+    }
+
+    // Method to update file hash
+    public void UpdateFileHash(string newHash)
+    {
+        FileHash = newHash;
+    }
 
     public override string ToString()
     {

@@ -5,148 +5,189 @@ using System.Threading.Tasks;
 using FileMole.Indexing;
 using FileMole.Storage;
 using FileMole.Core;
+using FileMole.Utils;
 using Xunit;
 
-namespace FileMole.Tests.Indexing
+namespace FileMole.Tests.Indexing;
+
+public class FileIndexerTests : IAsyncLifetime
 {
-    public class FileIndexerTests : IDisposable
+    private FileIndexer _indexer;
+    private readonly string _testDirectory;
+    private readonly string _dbPath;
+
+    public FileIndexerTests()
     {
-        private readonly FileIndexer _indexer;
-        private readonly string _testDirectory;
-        private readonly string _dbPath;
+        _testDirectory = Path.Combine(Path.GetTempPath(), "FileMoleIndexerTests_" + Guid.NewGuid().ToString());
+        _dbPath = Path.Combine(_testDirectory, "test.db");
 
-        public FileIndexerTests()
+        Directory.CreateDirectory(_testDirectory);
+        PrepareTestFiles();
+    }
+
+    private void PrepareTestFiles()
+    {
+        File.WriteAllText(Path.Combine(_testDirectory, "file1.txt"), "This is file 1");
+        File.WriteAllText(Path.Combine(_testDirectory, "file2.txt"), "This is file 2");
+        File.WriteAllText(Path.Combine(_testDirectory, "file3.txt"), "This is file 3");
+    }
+
+    public async Task InitializeAsync()
+    {
+        var options = new FileMoleOptions
         {
-            _testDirectory = Path.Combine(Path.GetTempPath(), "FileMoleIndexerTests_" + Guid.NewGuid().ToString());
-            _dbPath = Path.Combine(_testDirectory, "test_" + Guid.NewGuid().ToString() + ".db");
+            DatabasePath = _dbPath
+        };
+        _indexer = new FileIndexer(options);
+        await _indexer.ClearDatabaseAsync();
+    }
 
-            Directory.CreateDirectory(_testDirectory);
+    public async Task DisposeAsync()
+    {
+        await _indexer.DisposeAsync();
 
-            var options = new FileMoleOptions { DatabasePath = _dbPath };
-            _indexer = new FileIndexer(options);
-        }
-
-        public void Dispose()
+        try
         {
-            _indexer.Dispose();
-
-            // 데이터베이스 연결이 완전히 닫힐 때까지 잠시 대기
-            System.Threading.Thread.Sleep(500);
-
-            try
+            if (File.Exists(_dbPath))
             {
-                if (Directory.Exists(_testDirectory))
-                {
-                    Directory.Delete(_testDirectory, true);
-                }
+                File.Delete(_dbPath);
             }
-            catch (IOException)
+
+            if (Directory.Exists(_testDirectory))
             {
-                // 파일이 여전히 사용 중이라면 무시
-                Console.WriteLine($"Warning: Unable to delete test directory: {_testDirectory}");
+                Directory.Delete(_testDirectory, true);
             }
-
-            GC.SuppressFinalize(this);
         }
-
-        [Fact]
-        public async Task IndexFileAsync_ShouldIndexFile()
+        catch (IOException ex)
         {
-            await _indexer.ClearDatabaseAsync();
+            Console.WriteLine($"Warning: Unable to delete test directory or database: {ex.Message}");
+        }
+    }
 
-            // Arrange
-            var file = new FMFileInfo("testfile.txt", Path.Combine(_testDirectory, "testfile.txt"), 100, DateTime.Now, DateTime.Now, DateTime.Now, FileAttributes.Normal);
+    [Fact]
+    public async Task IndexFileAsync_ShouldIndexFile()
+    {
+        var filePath = Path.Combine(_testDirectory, "file1.txt");
+        var fileInfo = new FileInfo(filePath);
+        var file = FMFileInfo.FromFileInfo(fileInfo);
 
-            // Act
+        await _indexer.IndexFileAsync(file);
+
+        var result = await _indexer.SearchAsync("file1.txt");
+        Assert.Single(result);
+        Assert.Equal(file.Name, result.First().Name);
+    }
+
+    [Fact]
+    public async Task SearchAsync_ShouldReturnCorrectResults()
+    {
+        var file1 = FMFileInfo.FromFileInfo(new FileInfo(Path.Combine(_testDirectory, "file1.txt")));
+        var file2 = FMFileInfo.FromFileInfo(new FileInfo(Path.Combine(_testDirectory, "file2.txt")));
+        await _indexer.IndexFileAsync(file1);
+        await _indexer.IndexFileAsync(file2);
+
+        var result1 = await _indexer.SearchAsync("file1");
+        var result2 = await _indexer.SearchAsync("txt");
+
+        Assert.Single(result1);
+        Assert.Equal(file1.Name, result1.First().Name);
+        Assert.Equal(2, result2.Count());
+        Assert.Contains(result2, f => f.Name == file1.Name);
+        Assert.Contains(result2, f => f.Name == file2.Name);
+    }
+
+    [Fact]
+    public async Task IndexFileAsync_ShouldUpdateExistingFile()
+    {
+        var filePath = Path.Combine(_testDirectory, "updatefile.txt");
+        File.WriteAllText(filePath, "Initial content");
+        var initialFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
+        await _indexer.IndexFileAsync(initialFile);
+
+        var initialFileInfo = await _indexer.GetFileInfoAsync(filePath);
+        var initialHash = initialFileInfo.FileHash;
+
+        await Task.Delay(1000); // 파일 수정 시간이 확실히 변경되도록 대기
+
+        File.WriteAllText(filePath, "Updated content with more text");
+        var updatedFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
+        await _indexer.IndexFileAsync(updatedFile);
+
+        var updatedFileInfo = await _indexer.GetFileInfoAsync(filePath);
+        var updatedHash = updatedFileInfo.FileHash;
+
+        Assert.NotEqual(initialFile.Size, updatedFileInfo.Size);
+        Assert.NotEqual(initialHash, updatedHash);
+        Assert.NotEqual(initialFile.LastWriteTime, updatedFileInfo.LastWriteTime);
+    }
+
+    [Fact]
+    public async Task HasFileChangedAsync_ShouldDetectChanges()
+    {
+        var filePath = Path.Combine(_testDirectory, "changingfile.txt");
+        File.WriteAllText(filePath, "Initial content");
+        var initialFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
+        await _indexer.IndexFileAsync(initialFile);
+
+        Assert.False(await _indexer.HasFileChangedAsync(initialFile));
+
+        await Task.Delay(1000); // 파일 수정 시간이 확실히 변경되도록 대기
+
+        File.WriteAllText(filePath, "Modified content");
+        var modifiedFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
+
+        Assert.True(await _indexer.HasFileChangedAsync(modifiedFile));
+    }
+
+    [Fact]
+    public async Task RemoveFileAsync_ShouldRemoveFileFromIndex()
+    {
+        var filePath = Path.Combine(_testDirectory, "file1.txt");
+        var file = FMFileInfo.FromFileInfo(new FileInfo(filePath));
+        await _indexer.IndexFileAsync(file);
+
+        await _indexer.RemoveFileAsync(file.FullPath);
+
+        var result = await _indexer.SearchAsync("file1.txt");
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task GetFileCountAsync_ShouldReturnCorrectCount()
+    {
+        // 테스트 디렉터리의 파일 정보를 가져와 FMFileInfo 객체로 변환
+        var files = Directory.GetFiles(_testDirectory)
+                             .Select(f => FMFileInfo.FromFileInfo(new FileInfo(f)))
+                             .ToArray();
+
+        // 모든 파일을 인덱싱
+        foreach (var file in files)
+        {
             await _indexer.IndexFileAsync(file);
-
-            // Assert
-            var result = await _indexer.SearchAsync("testfile.txt");
-            Assert.Single(result);
-            Assert.Equal(file.Name, result.First().Name);
         }
 
-        [Fact]
-        public async Task SearchAsync_ShouldReturnCorrectResults()
+        // 테스트 디렉터리의 파일 개수 조회
+        var result = await _indexer.GetFileCountAsync(_testDirectory);
+
+        // 예상되는 파일 개수와 실제 결과를 비교
+        Assert.Equal(files.Length, result);
+    }
+
+    [Fact]
+    public async Task ClearDatabaseAsync_ShouldRemoveAllEntries()
+    {
+        var files = Directory.GetFiles(_testDirectory)
+                             .Select(f => FMFileInfo.FromFileInfo(new FileInfo(f)))
+                             .ToArray();
+
+        foreach (var file in files)
         {
-            await _indexer.ClearDatabaseAsync();
-
-            // Arrange
-            var file1 = new FMFileInfo("file1.txt", Path.Combine(_testDirectory, "file1.txt"), 100, DateTime.Now, DateTime.Now, DateTime.Now, FileAttributes.Normal);
-            var file2 = new FMFileInfo("file2.txt", Path.Combine(_testDirectory, "file2.txt"), 200, DateTime.Now, DateTime.Now, DateTime.Now, FileAttributes.Normal);
-            await _indexer.IndexFileAsync(file1);
-            await _indexer.IndexFileAsync(file2);
-
-            // Act
-            var result1 = await _indexer.SearchAsync("file1");
-            var result2 = await _indexer.SearchAsync("txt");
-
-            // Assert
-            Assert.Single(result1);
-            Assert.Equal(file1.Name, result1.First().Name);
-            Assert.Equal(2, result2.Count());
-            Assert.Contains(result2, f => f.Name == file1.Name);
-            Assert.Contains(result2, f => f.Name == file2.Name);
-        }
-
-        [Fact]
-        public async Task IndexFileAsync_ShouldUpdateExistingFile()
-        {
-            await _indexer.ClearDatabaseAsync();
-
-            // Arrange
-            var file = new FMFileInfo("updatefile.txt", Path.Combine(_testDirectory, "updatefile.txt"), 100, DateTime.Now, DateTime.Now, DateTime.Now, FileAttributes.Normal);
             await _indexer.IndexFileAsync(file);
-
-            // Act
-            var updatedFile = new FMFileInfo(file.Name, file.FullPath, 200, file.CreationTime, DateTime.Now, DateTime.Now, FileAttributes.ReadOnly);
-            await _indexer.IndexFileAsync(updatedFile);
-
-            // Assert
-            var result = await _indexer.SearchAsync("updatefile.txt");
-            Assert.Single(result);
-            Assert.Equal(200, result.First().Size);
-            Assert.Equal(FileAttributes.ReadOnly, result.First().Attributes);
         }
 
-        [Fact]
-        public async Task SearchAsync_ShouldReturnEmptyResultForNonExistentFile()
-        {
-            await _indexer.ClearDatabaseAsync();
+        await _indexer.ClearDatabaseAsync();
 
-            // Act
-            var result = await _indexer.SearchAsync("nonexistentfile.txt");
-
-            // Assert
-            Assert.Empty(result);
-        }
-
-        [Fact]
-        public async Task IndexFileAsync_ShouldHandleMultipleFiles()
-        {
-            await _indexer.ClearDatabaseAsync();
-
-            // Arrange
-            var files = new[]
-            {
-                new FMFileInfo("file1.txt", Path.Combine(_testDirectory, "file1.txt"), 100, DateTime.Now, DateTime.Now, DateTime.Now, FileAttributes.Normal),
-                new FMFileInfo("file2.txt", Path.Combine(_testDirectory, "file2.txt"), 200, DateTime.Now, DateTime.Now, DateTime.Now, FileAttributes.Normal),
-                new FMFileInfo("file3.txt", Path.Combine(_testDirectory, "file3.txt"), 300, DateTime.Now, DateTime.Now, DateTime.Now, FileAttributes.Normal)
-            };
-
-            // Act
-            foreach (var file in files)
-            {
-                await _indexer.IndexFileAsync(file);
-            }
-
-            // Assert
-            var result = await _indexer.SearchAsync("file");
-            Assert.Equal(3, result.Count());
-            foreach (var file in files)
-            {
-                Assert.Contains(result, f => f.Name == file.Name && f.Size == file.Size);
-            }
-        }
+        var result = await _indexer.SearchAsync("file");
+        Assert.Empty(result);
     }
 }

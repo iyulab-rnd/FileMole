@@ -1,8 +1,4 @@
-﻿using FileMole.Storage;
-using FileMole.Events;
-using FileMole.Indexing;
-using System;
-using System.IO;
+﻿using Microsoft.Extensions.Configuration;
 
 namespace FileMole.Core;
 
@@ -10,46 +6,24 @@ public class FileMoleBuilder
 {
     private FileMoleOptions _options = new FileMoleOptions();
 
-    public FileMoleBuilder UseLocalStorage()
+    public FileMoleBuilder UseConfiguration(IConfiguration configuration)
     {
-        _options.StorageProvider = new LocalStorageProvider();
+        configuration.GetSection("FileMole").Bind(_options);
         return this;
     }
 
-    public FileMoleBuilder UseFileSystemWatcher()
+    public FileMoleBuilder AddMole(Mole mole)
     {
-        _options.FileSystemWatcher = new FMFileSystemWatcher(_options.DebouncePeriod);
+        _options.Moles.Add(mole);
         return this;
+    
+    }
+    public FileMoleBuilder AddMole(string path, MoleType type = MoleType.Local, string provider = "Default")
+    {
+        return AddMole(new Mole { Path = path, Type = type, Provider = provider });
     }
 
-    public FileMoleBuilder UseFileIndexer()
-    {
-        _options.FileIndexer = new FileIndexer(_options);
-        return this;
-    }
-
-    public FileMoleBuilder WithDebouncePeriod(TimeSpan period)
-    {
-        _options.DebouncePeriod = period;
-        return this;
-    }
-
-    public FileMoleBuilder UseDefaultDatabasePath()
-    {
-        string localAppDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string fileMolePath = Path.Combine(localAppDataPath, "FileMole");
-        Directory.CreateDirectory(fileMolePath);  // 디렉토리가 없으면 생성
-        _options.DatabasePath = Path.Combine(fileMolePath, "filemole.db");
-        return this;
-    }
-
-    public FileMoleBuilder UseDatabasePath(string path)
-    {
-        _options.DatabasePath = path;
-        return this;
-    }
-
-    public IFileMole Build()
+    public FileMole Build()
     {
         return new FileMole(_options);
     }

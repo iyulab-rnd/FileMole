@@ -3,16 +3,14 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FileMole", "FileMole\FileMole.csproj", "{D39765E3-1EE1-4782-A654-FAD290482B0F}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FileMole", "FileMole\FileMole.csproj", "{D39765E3-1EE1-4782-A654-FAD290482B0F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FileMole.Tests", "FileMole.Tests\FileMole.Tests.csproj", "{0DFE761C-0E93-45B6-BFAA-0DD27E518EE8}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FileMole.Tests", "FileMole.Tests\FileMole.Tests.csproj", "{0DFE761C-0E93-45B6-BFAA-0DD27E518EE8}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "솔루션 항목", "솔루션 항목", "{6CE363AD-114D-4B9C-B5F5-63D6F33CB7BC}"
 	ProjectSection(SolutionItems) = preProject
 		..\README.md = ..\README.md
 	EndProjectSection
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FileMole.Samples.ConsoleApp", "FileMole.Samples.ConsoleApp\FileMole.Samples.ConsoleApp.csproj", "{2295F088-07A7-4CAC-8CA2-B2699AA64C82}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -28,10 +26,6 @@ Global
 		{0DFE761C-0E93-45B6-BFAA-0DD27E518EE8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0DFE761C-0E93-45B6-BFAA-0DD27E518EE8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0DFE761C-0E93-45B6-BFAA-0DD27E518EE8}.Release|Any CPU.Build.0 = Release|Any CPU
-		{2295F088-07A7-4CAC-8CA2-B2699AA64C82}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{2295F088-07A7-4CAC-8CA2-B2699AA64C82}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{2295F088-07A7-4CAC-8CA2-B2699AA64C82}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{2295F088-07A7-4CAC-8CA2-B2699AA64C82}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

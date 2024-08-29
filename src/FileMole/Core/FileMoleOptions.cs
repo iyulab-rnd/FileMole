@@ -1,15 +1,21 @@
-﻿using FileMole.Storage;
-using FileMole.Events;
-using FileMole.Indexing;
-using System;
-
-namespace FileMole.Core;
+﻿namespace FileMole.Core;
 
 public class FileMoleOptions
 {
-    public IStorageProvider StorageProvider { get; set; }
-    public IFMFileSystemWatcher FileSystemWatcher { get; set; }
-    public IFileIndexer FileIndexer { get; set; }
-    public TimeSpan DebouncePeriod { get; set; } = TimeSpan.FromMilliseconds(300);
-    public string DatabasePath { get; set; }
+    public List<Mole> Moles { get; set; } = [];
+    public string? DatabasePath { get; set; }
+}
+
+public class Mole
+{
+    public required string Path { get; set; }
+    public MoleType Type { get; set; } = MoleType.Local;
+    public string Provider { get; set; } = "Default";
+}
+
+public enum MoleType
+{
+    Local,
+    Remote,
+    Cloud
 }
