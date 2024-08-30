@@ -1,21 +1,48 @@
-﻿namespace FileMole.Storage;
+﻿using System.Security;
+using System.Security.AccessControl;
+using System.IO;
+
+namespace FileMole.Storage;
 
 public class LocalStorageProvider : IStorageProvider
 {
+    public Task<FMFileInfo> GetFileAsync(string filePath)
+    {
+        return Task.Run(() =>
+        {
+            var fileInfo = new FileInfo(filePath);
+            return FMFileInfo.FromFileInfo(fileInfo);
+        });
+    }
+
     public async Task<IEnumerable<FMFileInfo>> GetFilesAsync(string path)
     {
         return await Task.Run(() =>
         {
+            var files = new List<FMFileInfo>();
             var directoryInfo = new DirectoryInfo(path);
-            return directoryInfo.GetFiles().Select(fi => new FMFileInfo(
-                fi.Name,
-                fi.FullName,
-                fi.Length,
-                fi.CreationTime,
-                fi.LastWriteTime,
-                fi.LastAccessTime,
-                fi.Attributes
-            ));
+
+            try
+            {
+                foreach (var fileInfo in directoryInfo.EnumerateFiles())
+                {
+                    files.Add(FMFileInfo.FromFileInfo(fileInfo));
+                }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Console.WriteLine($"Access denied to directory: {path}. Error: {ex.Message}");
+            }
+            catch (SecurityException ex)
+            {
+                Console.WriteLine($"Security error accessing directory {path}. Error: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error accessing directory {path}. Error: {ex.Message}");
+            }
+
+            return files;
         });
     }
 
@@ -23,15 +50,80 @@ public class LocalStorageProvider : IStorageProvider
     {
         return await Task.Run(() =>
         {
+            var directories = new List<FMDirectoryInfo>();
             var directoryInfo = new DirectoryInfo(path);
-            return directoryInfo.GetDirectories().Select(di => new FMDirectoryInfo(
-                di.Name,
-                di.FullName,
-                di.CreationTime,
-                di.LastWriteTime,
-                di.LastAccessTime,
-                di.Attributes
-            ));
+
+            try
+            {
+                foreach (var dirInfo in directoryInfo.EnumerateDirectories())
+                {
+                    directories.Add(new FMDirectoryInfo(
+                        dirInfo.Name,
+                        dirInfo.FullName,
+                        dirInfo.CreationTime,
+                        dirInfo.LastWriteTime,
+                        dirInfo.LastAccessTime,
+                        dirInfo.Attributes
+                    ));
+                }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Console.WriteLine($"Access denied to directory: {path}. Error: {ex.Message}");
+            }
+            catch (SecurityException ex)
+            {
+                Console.WriteLine($"Security error accessing directory {path}. Error: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error accessing directory {path}. Error: {ex.Message}");
+            }
+
+            return directories;
+        });
+    }
+
+    public static async Task<bool> HasAccessAsync(string path)
+    {
+        return await Task.Run(async () =>
+        {
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    // 디렉토리에 대한 접근을 확인하기 위해 첫 번째 항목만 열거
+                    using var enumerator = Directory.EnumerateFileSystemEntries(path).GetEnumerator();
+                    return await Task.FromResult(enumerator.MoveNext());
+                }
+                else if (File.Exists(path))
+                {
+                    // 파일에 대한 접근을 비동기적으로 확인
+                    using var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true);
+                    await fileStream.ReadAsync((new byte[1]).AsMemory(0, 1));
+                }
+                else
+                {
+                    return false;
+                }
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+            catch (SecurityException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         });
     }
 

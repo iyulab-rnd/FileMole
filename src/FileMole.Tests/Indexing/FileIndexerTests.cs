@@ -104,7 +104,7 @@ public class FileIndexerTests : IAsyncLifetime
         var initialFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
         await _indexer.IndexFileAsync(initialFile);
 
-        var initialFileInfo = await _indexer.GetFileInfoAsync(filePath);
+        var initialFileInfo = await _indexer.GetIndexedFileInfoAsync(filePath);
         var initialHash = initialFileInfo.FileHash;
 
         await Task.Delay(1000); // 파일 수정 시간이 확실히 변경되도록 대기
@@ -113,7 +113,7 @@ public class FileIndexerTests : IAsyncLifetime
         var updatedFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
         await _indexer.IndexFileAsync(updatedFile);
 
-        var updatedFileInfo = await _indexer.GetFileInfoAsync(filePath);
+        var updatedFileInfo = await _indexer.GetIndexedFileInfoAsync(filePath);
         var updatedHash = updatedFileInfo.FileHash;
 
         Assert.NotEqual(initialFile.Size, updatedFileInfo.Size);

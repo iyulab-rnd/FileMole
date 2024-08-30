@@ -40,6 +40,11 @@ internal class CloudStorageProvider : IStorageProvider
         throw new NotImplementedException();
     }
 
+    public Task<FMFileInfo> GetFileAsync(string filePath)
+    {
+        throw new NotImplementedException();
+    }
+
     public Task<IEnumerable<FMFileInfo>> GetFilesAsync(string path)
     {
         throw new NotImplementedException();

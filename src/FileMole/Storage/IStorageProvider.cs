@@ -2,6 +2,7 @@
 
 public interface IStorageProvider
 {
+    Task<FMFileInfo> GetFileAsync(string filePath);
     Task<IEnumerable<FMFileInfo>> GetFilesAsync(string path);
     Task<IEnumerable<FMDirectoryInfo>> GetDirectoriesAsync(string path);
     Task<Stream> OpenFileAsync(string path, FileMode mode);

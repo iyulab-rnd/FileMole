@@ -66,16 +66,8 @@ public class FMDirectoryInfo
         var files = new List<FMFileInfo>();
         foreach (var file in System.IO.Directory.GetFiles(FullPath))
         {
-            var fileInfo = new System.IO.FileInfo(file);
-            files.Add(new FMFileInfo(
-                fileInfo.Name,
-                fileInfo.FullName,
-                fileInfo.Length,
-                fileInfo.CreationTime,
-                fileInfo.LastWriteTime,
-                fileInfo.LastAccessTime,
-                fileInfo.Attributes
-            ));
+            var fmFileInfo = FMFileInfo.FromPath(file);
+            files.Add(fmFileInfo);
         }
         return files;
     }

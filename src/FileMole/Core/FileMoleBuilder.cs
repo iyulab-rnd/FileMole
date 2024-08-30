@@ -4,7 +4,7 @@ namespace FileMole.Core;
 
 public class FileMoleBuilder
 {
-    private FileMoleOptions _options = new FileMoleOptions();
+    private FileMoleOptions _options = new();
 
     public FileMoleBuilder UseConfiguration(IConfiguration configuration)
     {

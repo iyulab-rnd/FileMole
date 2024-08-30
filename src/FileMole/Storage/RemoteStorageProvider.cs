@@ -3,6 +3,7 @@ namespace FileMole.Storage;
 
 internal class RemoteStorageProvider : IStorageProvider
 {
+
     public Task CopyAsync(string sourcePath, string destinationPath)
     {
         throw new NotImplementedException();
@@ -29,6 +30,11 @@ internal class RemoteStorageProvider : IStorageProvider
     }
 
     public Task<IEnumerable<FMDirectoryInfo>> GetDirectoriesAsync(string path)
+    {
+        throw new NotImplementedException();
+    }
+
+    public Task<FMFileInfo> GetFileAsync(string filePath)
     {
         throw new NotImplementedException();
     }
