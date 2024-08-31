@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "솔루션 항목", "솔루션 항목", "{6CE363AD-114D-4B9C-B5F5-63D6F33CB7BC}"
+	ProjectSection(SolutionItems) = preProject
+		..\README.md = ..\README.md
+	EndProjectSection
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FileMoles", "FileMoles\FileMoles.csproj", "{496894EA-B5B4-4863-ABBD-319FCE17604A}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FileMoles.Tests", "FileMoles.Tests\FileMoles.Tests.csproj", "{B1ED2143-AEF5-44D5-8BE7-988E688B6504}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{496894EA-B5B4-4863-ABBD-319FCE17604A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{496894EA-B5B4-4863-ABBD-319FCE17604A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{496894EA-B5B4-4863-ABBD-319FCE17604A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{496894EA-B5B4-4863-ABBD-319FCE17604A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B1ED2143-AEF5-44D5-8BE7-988E688B6504}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1ED2143-AEF5-44D5-8BE7-988E688B6504}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1ED2143-AEF5-44D5-8BE7-988E688B6504}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1ED2143-AEF5-44D5-8BE7-988E688B6504}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {EA19B871-EC65-4394-93F0-F9968A7118A9}
+	EndGlobalSection
+EndGlobal
