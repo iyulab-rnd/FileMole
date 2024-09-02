@@ -2,8 +2,6 @@
 using FileMoles.Events;
 using FileMoles.Indexing;
 using System.Text.Json;
-using System.Collections.Concurrent;
-using LibGit2Sharp;
 
 namespace FileMoles;
 

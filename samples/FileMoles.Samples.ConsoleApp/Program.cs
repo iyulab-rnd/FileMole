@@ -39,9 +39,9 @@ class Program
             Console.WriteLine($"File renamed: {e.OldFullPath} -> {e.FullPath}");
         };
 
-        fileMole.DebouncedFileUpdated += (sender, e) =>
+        fileMole.MoleTrackChanged += (sender, e) =>
         {
-            Console.WriteLine($"Debounced file updated: {e.FullPath}");
+            Console.WriteLine($"MoleTrackChanged: {e.FullPath}");
         };
 
         // 파일 검색 예제

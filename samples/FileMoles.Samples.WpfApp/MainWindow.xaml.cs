@@ -37,7 +37,7 @@ public partial class MainWindow : Window
         _fileMole.FileDeleted += FileMole_FileDeleted;
         _fileMole.FileRenamed += FileMole_FileRenamed;
         _fileMole.InitialScanCompleted += (sender, e) => LogMessage("Initial scan completed.");
-        _fileMole.DebouncedFileUpdated += (sender, e) => LogMessage($"Debounced file updated: {e.FullPath}");
+        _fileMole.MoleTrackChanged += (sender, e) => LogMessage($"MoleTrackChanged: {e.FullPath}, {e.Diff}");
 
         LogMessage("FileMole initialized.");
     }
