@@ -16,11 +16,23 @@ public class FileMoleBuilder
     {
         _options.Moles.Add(mole);
         return this;
-
     }
+
     public FileMoleBuilder AddMole(string path, MoleType type = MoleType.Local, string provider = "Default")
     {
         return AddMole(new Mole { Path = path, Type = type, Provider = provider });
+    }
+
+    public FileMoleBuilder SetOptions(FileMoleOptions options)
+    {
+        _options = options;
+        return this;
+    }
+
+    public FileMoleBuilder SetOptions(Action<FileMoleOptions> configureOptions)
+    {
+        configureOptions(_options);
+        return this;
     }
 
     public FileMole Build()

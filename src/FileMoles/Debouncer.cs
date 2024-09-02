@@ -2,19 +2,19 @@
 
 namespace FileMoles;
 
-internal class Debouncer<T>
+internal class Debouncer<T> : IDisposable
 {
     private readonly System.Timers.Timer _timer;
     private readonly Dictionary<string, T> _debouncedItems;
-    private readonly Action<IEnumerable<T>> _action;
+    private readonly Func<IEnumerable<T>, Task> _asyncAction;
 
-    public Debouncer(int interval, Action<IEnumerable<T>> action)
+    public Debouncer(int interval, Func<IEnumerable<T>, Task> asyncAction)
     {
         _timer = new System.Timers.Timer(interval);
         _timer.Elapsed += OnTimerElapsed;
         _timer.AutoReset = false;
         _debouncedItems = new Dictionary<string, T>();
-        _action = action;
+        _asyncAction = asyncAction;
     }
 
     public void Debounce(string key, T item)
@@ -24,9 +24,17 @@ internal class Debouncer<T>
         _timer.Start();
     }
 
-    private void OnTimerElapsed(object? sender, ElapsedEventArgs e)
+    public Task DebounceAsync(string key, T item)
     {
-        _action(_debouncedItems.Values);
+        Debounce(key, item);
+        var tcs = new TaskCompletionSource<bool>();
+        _timer.Elapsed += (sender, args) => tcs.TrySetResult(true);
+        return tcs.Task;
+    }
+
+    private async void OnTimerElapsed(object? sender, ElapsedEventArgs e)
+    {
+        await _asyncAction(_debouncedItems.Values);
         _debouncedItems.Clear();
     }
 

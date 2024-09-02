@@ -2,24 +2,24 @@
 
 namespace FileMoles.Tests
 {
-    public class FileMoleEventTests : IDisposable
+    public class FileMoleEventTests : IClassFixture<FileMoleFixture>, IDisposable
     {
         private readonly string _tempPath;
         private readonly FileMole _fileMole;
         private readonly ITestOutputHelper _output;
+        private readonly FileMoleFixture _fixture;
 
-        public FileMoleEventTests(ITestOutputHelper output)
+        public FileMoleEventTests(FileMoleFixture fixture, ITestOutputHelper output)
         {
+            _fixture = fixture;
             _output = output;
-            _tempPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-            Directory.CreateDirectory(_tempPath);
+            _tempPath = _fixture.TestDir;
 
             var options = new FileMoleOptions();
             _fileMole = new FileMoleBuilder()
                 .AddMole(_tempPath)
                 .Build();
         }
-
 
         private async Task<string> CreateUniqueFileAsync(string content = "Test content")
         {
@@ -183,7 +183,7 @@ namespace FileMoles.Tests
         public void Dispose()
         {
             _fileMole.Dispose();
-            RetryOnExceptionAsync(() => { Directory.Delete(_tempPath, true); return Task.CompletedTask; }).Wait();
+            GC.SuppressFinalize(this);
         }
     }
 }

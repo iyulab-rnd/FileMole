@@ -1,6 +1,9 @@
 ﻿using FileMoles.Storage;
 using FileMoles.Events;
 using FileMoles.Indexing;
+using System.Text.Json;
+using System.Collections.Concurrent;
+using LibGit2Sharp;
 
 namespace FileMoles;
 
@@ -10,13 +13,15 @@ public class FileMole : IDisposable
     private readonly FileIndexer _fileIndexer;
     private readonly FMFileSystemWatcher _fileSystemWatcher;
     private readonly Dictionary<string, IStorageProvider> _storageProviders;
-    private readonly Debouncer<FileSystemEvent> _debouncer;
+    private readonly Dictionary<string, FileMoleTrack> _moleTracks = [];
+    private readonly Debouncer<FileSystemEvent> _moleTrackDebouncer;
+    private readonly string _moleConfigPath;
 
     public event EventHandler<FileMoleEventArgs>? FileCreated;
     public event EventHandler<FileMoleEventArgs>? FileChanged;
     public event EventHandler<FileMoleEventArgs>? FileDeleted;
     public event EventHandler<FileMoleEventArgs>? FileRenamed;
-    public event EventHandler<FileMoleEventArgs>? DebouncedFileUpdated;
+    public event EventHandler<FileMoleTrackChangedEventArgs>? MoleTrackChanged;
 
     public bool IsInitialScanComplete { get; private set; }
     public event EventHandler? InitialScanCompleted;
@@ -28,10 +33,13 @@ public class FileMole : IDisposable
         _fileSystemWatcher = new FMFileSystemWatcher(_fileIndexer);
         _storageProviders = new Dictionary<string, IStorageProvider>();
 
-        _debouncer = new Debouncer<FileSystemEvent>(_options.DebounceTime, OnDebouncedEvents);
+        _moleTrackDebouncer = new Debouncer<FileSystemEvent>(_options.DebounceTime, OnMoleTrackDebouncedEvents);
+
+        _moleConfigPath = Functions.GetTrackConfigPath();
 
         InitializeStorageProviders();
         InitializeFileWatcher();
+        LoadMoleTrackConfig();
     }
 
     private void InitializeStorageProviders()
@@ -58,10 +66,10 @@ public class FileMole : IDisposable
 
     private void InitializeFileWatcher()
     {
-        _fileSystemWatcher.FileCreated += (sender, e) => HandleFileEvent(e, RaiseFileCreatedEvent);
-        _fileSystemWatcher.FileChanged += (sender, e) => HandleFileEvent(e, RaiseFileChangedEvent);
-        _fileSystemWatcher.FileDeleted += (sender, e) => HandleFileEvent(e, RaiseFileDeletedEvent);
-        _fileSystemWatcher.FileRenamed += (sender, e) => HandleFileEvent(e, RaiseFileRenamedEvent);
+        _fileSystemWatcher.FileCreated += async (sender, e) => await HandleFileEventAsync(e, RaiseFileCreatedEvent);
+        _fileSystemWatcher.FileChanged += async (sender, e) => await HandleFileEventAsync(e, RaiseFileChangedEvent);
+        _fileSystemWatcher.FileDeleted += async (sender, e) => await HandleFileEventAsync(e, RaiseFileDeletedEvent);
+        _fileSystemWatcher.FileRenamed += async (sender, e) => await HandleFileEventAsync(e, RaiseFileRenamedEvent);
 
         foreach (var mole in _options.Moles)
         {
@@ -69,17 +77,31 @@ public class FileMole : IDisposable
         }
     }
 
-    private void HandleFileEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
+    private async Task HandleFileEventAsync(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
     {
         raiseEvent(e);
-        _debouncer.Debounce(e.FullPath, e);
-    }
-
-    private void OnDebouncedEvents(IEnumerable<FileSystemEvent> events)
-    {
-        foreach (var e in events)
+        var directoryPath = Path.GetDirectoryName(e.FullPath)!;
+        if (_moleTracks.TryGetValue(directoryPath, out var moleTrack))
         {
-            RaiseDebouncedFileUpdatedEvent(e);
+            if (e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed)
+            {
+                if (moleTrack.ShouldTrackFile(e.FullPath))
+                {
+                    await _moleTrackDebouncer.DebounceAsync(e.FullPath, e);
+                }
+            }
+            else if (e.ChangeType == WatcherChangeTypes.Deleted)
+            {
+                await moleTrack.RemoveFileAsync(e.FullPath);
+            }
+            else if (e.ChangeType == WatcherChangeTypes.Renamed)
+            {
+                await moleTrack.RemoveFileAsync(e.OldFullPath!);
+                if (moleTrack.ShouldTrackFile(e.FullPath))
+                {
+                    await _moleTrackDebouncer.DebounceAsync(e.FullPath, e);
+                }
+            }
         }
     }
 
@@ -107,10 +129,29 @@ public class FileMole : IDisposable
         FileRenamed?.Invoke(this, args);
     }
 
-    private void RaiseDebouncedFileUpdatedEvent(FileSystemEvent internalEvent)
+    private async Task OnMoleTrackDebouncedEvents(IEnumerable<FileSystemEvent> events)
     {
-        var args = new FileMoleEventArgs(internalEvent);
-        DebouncedFileUpdated?.Invoke(this, args);
+        foreach (var e in events)
+        {
+            var directoryPath = Path.GetDirectoryName(e.FullPath)!;
+            if (_moleTracks.TryGetValue(directoryPath, out var moleTrack))
+            {
+                if (moleTrack.ShouldTrackFile(e.FullPath))
+                {
+                    try
+                    {
+                        var diff = await moleTrack.TrackAndGetDiffAsync(e.FullPath);
+                        if (diff == null) continue;
+
+                        MoleTrackChanged?.Invoke(this, new FileMoleTrackChangedEventArgs(e, diff));
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error processing file {e.FullPath}: {ex.Message}");
+                    }
+                }
+            }
+        }
     }
 
     public async Task<FMFileInfo> GetFileAsync(string filePath)
@@ -135,7 +176,7 @@ public class FileMole : IDisposable
         else
         {
             var localProvider = new LocalStorageProvider();
-            return await localProvider.GetFilesAsync(path);
+            return await provider.GetFilesAsync(path);
         }
     }
 
@@ -223,7 +264,10 @@ public class FileMole : IDisposable
             var files = await _storageProviders[path].GetFilesAsync(path);
             foreach (var file in files)
             {
-                await _fileIndexer.IndexFileAsync(file);
+                if (file.Size <= _options.MaxFileSizeBytes)
+                {
+                    await _fileIndexer.IndexFileAsync(file);
+                }
             }
 
             var directories = await _storageProviders[path].GetDirectoriesAsync(path);
@@ -234,8 +278,138 @@ public class FileMole : IDisposable
         }
         catch (Exception ex)
         {
-            // 로그 기록 또는 에러 처리
             Console.WriteLine($"Error scanning directory {path}: {ex.Message}");
+        }
+    }
+
+    private void LoadMoleTrackConfig()
+    {
+        if (File.Exists(_moleConfigPath))
+        {
+            var config = JsonSerializer.Deserialize<FileMoleTrackConfig>(File.ReadAllText(_moleConfigPath));
+            if (config == null) return;
+
+            var validPaths = new List<string>();
+
+            foreach (var trackedPath in config.TrackedPaths)
+            {
+                if (File.Exists(trackedPath) || Directory.Exists(trackedPath))
+                {
+                    EnableMoleTrack(trackedPath);
+                    validPaths.Add(trackedPath);
+                }
+                else
+                {
+                    Console.WriteLine($"Warning: Tracked path no longer exists and will be removed from config: {trackedPath}");
+                }
+            }
+
+            // Update the config if any invalid paths were found
+            if (validPaths.Count != config.TrackedPaths.Count)
+            {
+                config.TrackedPaths = validPaths;
+                SaveMoleTrackConfig();
+            }
+        }
+    }
+
+    private void SaveMoleTrackConfig()
+    {
+        var config = new FileMoleTrackConfig
+        {
+            TrackedPaths = _moleTracks.Keys.ToList()
+        };
+        File.WriteAllText(_moleConfigPath, JsonSerializer.Serialize(config));
+    }
+
+    public void EnableMoleTrack(string path)
+    {
+        if (File.Exists(path))
+        {
+            EnableMoleTrackForFile(path);
+        }
+        else if (Directory.Exists(path))
+        {
+            EnableMoleTrackForDirectory(path);
+        }
+        else
+        {
+            throw new ArgumentException($"Path does not exist: {path}");
+        }
+
+        SaveMoleTrackConfig();
+    }
+
+    private void EnableMoleTrackForFile(string filePath)
+    {
+        var directoryPath = Path.GetDirectoryName(filePath);
+        if (!_moleTracks.ContainsKey(directoryPath))
+        {
+            _moleTracks[directoryPath] = new FileMoleTrack(directoryPath, _options);
+        }
+        _moleTracks[directoryPath].AddTrackedFile(filePath);
+    }
+
+    private void EnableMoleTrackForDirectory(string directoryPath)
+    {
+        if (!_moleTracks.ContainsKey(directoryPath))
+        {
+            _moleTracks[directoryPath] = new FileMoleTrack(directoryPath, _options);
+        }
+
+        // Add default ignore patterns
+        _moleTracks[directoryPath].AddIgnorePattern(".mole");
+        _moleTracks[directoryPath].AddIgnorePattern(".git");
+        _moleTracks[directoryPath].AddIgnorePattern("*.tmp");
+        _moleTracks[directoryPath].AddIgnorePattern("*.log");
+    }
+
+    public void AddIgnorePattern(string path, string pattern)
+    {
+        if (_moleTracks.TryGetValue(path, out var moleTrack))
+        {
+            moleTrack.AddIgnorePattern(pattern);
+        }
+        else
+        {
+            throw new ArgumentException($"No MoleTrack found for path: {path}");
+        }
+    }
+
+    public void DisableMoleTrack(string path)
+    {
+        if (File.Exists(path))
+        {
+            DisableMoleTrackForFile(path);
+        }
+        else if (Directory.Exists(path))
+        {
+            DisableMoleTrackForDirectory(path);
+        }
+
+        SaveMoleTrackConfig();
+    }
+
+    private void DisableMoleTrackForFile(string filePath)
+    {
+        var directoryPath = Path.GetDirectoryName(filePath);
+        if (_moleTracks.TryGetValue(directoryPath, out var moleTrack))
+        {
+            moleTrack.RemoveTrackedFile(filePath);
+            if (!moleTrack.HasTrackedFiles)
+            {
+                moleTrack.Dispose();
+                _moleTracks.Remove(directoryPath);
+            }
+        }
+    }
+
+    private void DisableMoleTrackForDirectory(string directoryPath)
+    {
+        if (_moleTracks.TryGetValue(directoryPath, out var moleTrack))
+        {
+            moleTrack.Dispose();
+            _moleTracks.Remove(directoryPath);
         }
     }
 
@@ -255,7 +429,12 @@ public class FileMole : IDisposable
             {
                 (provider as IDisposable)?.Dispose();
             }
-            _debouncer.Dispose();
+            _moleTrackDebouncer.Dispose();
+            foreach (var moleTrack in _moleTracks.Values)
+            {
+                moleTrack.Dispose();
+            }
+            _moleTracks.Clear();
         }
     }
 }

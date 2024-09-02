@@ -23,23 +23,31 @@ public class FileIndexer : IDisposable, IAsyncDisposable
 
     private void InitializeDatabase()
     {
-        EnsureConnectionOpen();
-        using var command = _connection.CreateCommand();
-        command.CommandText = @"
-        CREATE TABLE IF NOT EXISTS FileIndex (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            Name TEXT NOT NULL,
-            FullPath TEXT NOT NULL UNIQUE,
-            Size INTEGER NOT NULL,
-            CreationTime TEXT NOT NULL,
-            LastWriteTime TEXT NOT NULL,
-            LastAccessTime TEXT NOT NULL,
-            Attributes INTEGER NOT NULL,
-            FileHash TEXT,
-            LastFileHash TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_FileIndex_FullPath ON FileIndex(FullPath);";
-        command.ExecuteNonQuery();
+        try
+        {
+            EnsureConnectionOpen();
+            using var command = _connection.CreateCommand();
+            command.CommandText = @"
+            CREATE TABLE IF NOT EXISTS FileIndex (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                FullPath TEXT NOT NULL UNIQUE,
+                Size INTEGER NOT NULL,
+                CreationTime TEXT NOT NULL,
+                LastWriteTime TEXT NOT NULL,
+                LastAccessTime TEXT NOT NULL,
+                Attributes INTEGER NOT NULL,
+                FileHash TEXT,
+                LastFileHash TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_FileIndex_FullPath ON FileIndex(FullPath);";
+            command.ExecuteNonQuery();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error initializing database: {ex.Message}");
+            throw;
+        }
     }
 
     private void EnsureConnectionOpen()
@@ -52,123 +60,133 @@ public class FileIndexer : IDisposable, IAsyncDisposable
 
     public async Task<bool> IndexFileAsync(FMFileInfo file)
     {
-        EnsureConnectionOpen(); // 데이터베이스 연결이 열려 있는지 확인
-
-        string fileHash = string.Empty;
-        bool isHashFailed = false;
+        if (FileMoleUtils.IsHidden(file.FullPath))
+        {
+            return false;
+        }
 
         try
         {
-            fileHash = await GetFileHashAsync(file.FullPath, file.LastWriteTime);
+            EnsureConnectionOpen();
 
-            if (string.IsNullOrEmpty(fileHash))
+            string fileHash = await GetFileHashAsync(file.FullPath, file.LastWriteTime);
+            var existingFile = await GetIndexedFileInfoAsync(file.FullPath);
+            string lastFileHash = existingFile?.FileHash ?? string.Empty;
+
+            if (existingFile != null && !string.IsNullOrEmpty(fileHash))
             {
-                isHashFailed = true;
+                if (fileHash == existingFile.FileHash &&
+                    file.Size == existingFile.Size &&
+                    file.LastWriteTime == existingFile.LastWriteTime &&
+                    file.LastAccessTime == existingFile.LastAccessTime)
+                {
+                    return false;
+                }
             }
+
+            using var command = _connection.CreateCommand();
+            command.CommandText = @"
+            INSERT OR REPLACE INTO FileIndex 
+            (Name, FullPath, Size, CreationTime, LastWriteTime, LastAccessTime, Attributes, FileHash, LastFileHash) 
+            VALUES (@Name, @FullPath, @Size, @CreationTime, @LastWriteTime, @LastAccessTime, @Attributes, @FileHash, @LastFileHash)";
+
+            command.Parameters.AddWithValue("@Name", file.Name);
+            command.Parameters.AddWithValue("@FullPath", file.FullPath);
+            command.Parameters.AddWithValue("@Size", file.Size);
+            command.Parameters.AddWithValue("@CreationTime", file.CreationTime.ToString("o"));
+            command.Parameters.AddWithValue("@LastWriteTime", file.LastWriteTime.ToString("o"));
+            command.Parameters.AddWithValue("@LastAccessTime", file.LastAccessTime.ToString("o"));
+            command.Parameters.AddWithValue("@Attributes", (int)file.Attributes);
+            command.Parameters.AddWithValue("@FileHash", fileHash);
+            command.Parameters.AddWithValue("@LastFileHash", lastFileHash);
+
+            await command.ExecuteNonQueryAsync();
+            _fileHashCache[file.FullPath] = (fileHash, file.LastWriteTime);
+            return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"해시 생성 실패: {file.FullPath}, 오류: {ex.Message}");
-            isHashFailed = true;
+            Console.WriteLine($"Error indexing file: {ex.Message}");
+            return false;
         }
-
-        var existingFile = await GetIndexedFileInfoAsync(file.FullPath);
-        string lastFileHash = existingFile?.FileHash ?? string.Empty;
-
-        if (existingFile != null && !isHashFailed)
-        {
-            if (fileHash == existingFile.FileHash &&
-                file.Size == existingFile.Size &&
-                file.LastWriteTime == existingFile.LastWriteTime &&
-                file.LastAccessTime == existingFile.LastAccessTime)
-            {
-                return false;
-            }
-        }
-
-        if (isHashFailed)
-        {
-            fileHash = string.Empty;
-        }
-
-        EnsureConnectionOpen(); // 다시 한 번 연결이 열려 있는지 확인
-
-        using var command = _connection.CreateCommand();
-        command.CommandText = @"
-    INSERT OR REPLACE INTO FileIndex 
-    (Name, FullPath, Size, CreationTime, LastWriteTime, LastAccessTime, Attributes, FileHash, LastFileHash) 
-    VALUES (@Name, @FullPath, @Size, @CreationTime, @LastWriteTime, @LastAccessTime, @Attributes, @FileHash, @LastFileHash)";
-
-        command.Parameters.AddWithValue("@Name", file.Name);
-        command.Parameters.AddWithValue("@FullPath", file.FullPath);
-        command.Parameters.AddWithValue("@Size", file.Size);
-        command.Parameters.AddWithValue("@CreationTime", file.CreationTime.ToString("o"));
-        command.Parameters.AddWithValue("@LastWriteTime", file.LastWriteTime.ToString("o"));
-        command.Parameters.AddWithValue("@LastAccessTime", file.LastAccessTime.ToString("o"));
-        command.Parameters.AddWithValue("@Attributes", (int)file.Attributes);
-        command.Parameters.AddWithValue("@FileHash", fileHash);
-        command.Parameters.AddWithValue("@LastFileHash", lastFileHash);
-
-        await command.ExecuteNonQueryAsync();
-        _fileHashCache[file.FullPath] = (fileHash, file.LastWriteTime);
-        return true;
     }
+
 
     public async Task<bool> HasFileChangedAsync(FMFileInfo file)
     {
-        var existingFile = await GetIndexedFileInfoAsync(file.FullPath);
-        if (existingFile == null)
+        try
         {
-            return true; // 인덱스에 없는 파일은 변경된 것으로 간주
-        }
-
-        bool metadataChanged = file.Size != existingFile.Size ||
-                               file.LastWriteTime != existingFile.LastWriteTime ||
-                               file.LastAccessTime != existingFile.LastAccessTime;
-
-        if (metadataChanged)
-        {
-            var currentHash = await GetFileHashAsync(file.FullPath, file.LastWriteTime);
-            bool contentChanged = currentHash != existingFile.FileHash;
-
-            if (!contentChanged)
+            // 파일이 숨김 상태인 경우 변경되지 않은 것으로 처리
+            if (FileMoleUtils.IsHidden(file.FullPath))
             {
-                // 메타데이터만 변경된 경우, 인덱스 업데이트
-                await UpdateFileMetadataAsync(file, currentHash);
+                return false;
             }
 
-            return contentChanged;
-        }
+            var existingFile = await GetIndexedFileInfoAsync(file.FullPath);
+            if (existingFile == null)
+            {
+                return true;
+            }
 
-        return false;
+            bool metadataChanged = file.Size != existingFile.Size ||
+                                   file.LastWriteTime != existingFile.LastWriteTime ||
+                                   file.LastAccessTime != existingFile.LastAccessTime;
+
+            if (metadataChanged)
+            {
+                var currentHash = await GetFileHashAsync(file.FullPath, file.LastWriteTime);
+                bool contentChanged = currentHash != existingFile.FileHash;
+
+                if (!contentChanged)
+                {
+                    await UpdateFileMetadataAsync(file, currentHash);
+                }
+
+                return contentChanged;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error checking if file has changed: {ex.Message}");
+            return true;
+        }
     }
 
     private async Task UpdateFileMetadataAsync(FMFileInfo file, string currentHash)
     {
-        using var command = _connection.CreateCommand();
-        command.CommandText = @"
-            UPDATE FileIndex 
-            SET Size = @Size, 
-                LastWriteTime = @LastWriteTime, 
-                LastAccessTime = @LastAccessTime, 
-                FileHash = @FileHash
-            WHERE FullPath = @FullPath";
+        try
+        {
+            EnsureConnectionOpen();
+            using var command = _connection.CreateCommand();
+            command.CommandText = @"
+                UPDATE FileIndex 
+                SET Size = @Size, 
+                    LastWriteTime = @LastWriteTime, 
+                    LastAccessTime = @LastAccessTime, 
+                    FileHash = @FileHash
+                WHERE FullPath = @FullPath";
 
-        command.Parameters.AddWithValue("@Size", file.Size);
-        command.Parameters.AddWithValue("@LastWriteTime", file.LastWriteTime.ToString("o"));
-        command.Parameters.AddWithValue("@LastAccessTime", file.LastAccessTime.ToString("o"));
-        command.Parameters.AddWithValue("@FileHash", currentHash);
-        command.Parameters.AddWithValue("@FullPath", file.FullPath);
+            command.Parameters.AddWithValue("@Size", file.Size);
+            command.Parameters.AddWithValue("@LastWriteTime", file.LastWriteTime.ToString("o"));
+            command.Parameters.AddWithValue("@LastAccessTime", file.LastAccessTime.ToString("o"));
+            command.Parameters.AddWithValue("@FileHash", currentHash);
+            command.Parameters.AddWithValue("@FullPath", file.FullPath);
 
-        await command.ExecuteNonQueryAsync();
-        _fileHashCache[file.FullPath] = (currentHash, file.LastWriteTime);
+            await command.ExecuteNonQueryAsync();
+            _fileHashCache[file.FullPath] = (currentHash, file.LastWriteTime);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error updating file metadata: {ex.Message}");
+        }
     }
 
     private async Task<string> GetFileHashAsync(string filePath, DateTime lastWriteTime)
     {
         try
         {
-            // 캐시된 해시가 있고 파일이 변경되지 않았다면 캐시된 해시 반환
             if (_fileHashCache.TryGetValue(filePath, out var cachedInfo))
             {
                 if (cachedInfo.LastWriteTime == lastWriteTime)
@@ -177,13 +195,13 @@ public class FileIndexer : IDisposable, IAsyncDisposable
                 }
             }
 
-            // 해시 생성
             var hash = await _hashGenerator.GenerateHashAsync(filePath);
             _fileHashCache[filePath] = (hash, lastWriteTime);
             return hash;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.WriteLine($"Error generating file hash: {ex.Message}");
             return string.Empty;
         }
     }
@@ -205,95 +223,132 @@ public class FileIndexer : IDisposable, IAsyncDisposable
 
     public async Task<FMFileInfo?> GetIndexedFileInfoAsync(string fullPath)
     {
-        using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT * FROM FileIndex WHERE FullPath = @FullPath";
-        command.Parameters.AddWithValue("@FullPath", fullPath);
-
-        using var reader = await command.ExecuteReaderAsync();
-        if (await reader.ReadAsync())
+        try
         {
-            var fileInfo = BuildFileInfo(reader);
+            EnsureConnectionOpen();
+            using var command = _connection.CreateCommand();
+            command.CommandText = "SELECT * FROM FileIndex WHERE FullPath = @FullPath";
+            command.Parameters.AddWithValue("@FullPath", fullPath);
 
-            // 실제 파일 시스템에서 파일 존재 여부 확인
-            if (!File.Exists(fullPath))
+            using var reader = await command.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
             {
-                // 파일이 실제로 존재하지 않으면 인덱스에서 제거
-                await RemoveFileAsync(fullPath);
-                return null;
+                var fileInfo = BuildFileInfo(reader);
+
+                if (!File.Exists(fullPath))
+                {
+                    await RemoveFileAsync(fullPath);
+                    return null;
+                }
+
+                return fileInfo;
             }
 
-            return fileInfo;
+            return null;
         }
-
-        return null;
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error getting indexed file info: {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<IEnumerable<FMFileInfo>> SearchAsync(string searchTerm)
     {
-        using var command = _connection.CreateCommand();
-        command.CommandText = @"
-                SELECT * FROM FileIndex 
-                WHERE Name LIKE @SearchTerm OR FullPath LIKE @SearchTerm";
-        command.Parameters.AddWithValue("@SearchTerm", $"%{searchTerm}%");
-
-        var results = new List<FMFileInfo>();
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        try
         {
-            var fileInfo = BuildFileInfo(reader);
+            EnsureConnectionOpen();
+            using var command = _connection.CreateCommand();
+            command.CommandText = @"
+                    SELECT * FROM FileIndex 
+                    WHERE Name LIKE @SearchTerm OR FullPath LIKE @SearchTerm";
+            command.Parameters.AddWithValue("@SearchTerm", $"%{searchTerm}%");
 
-            // 실제 파일 시스템에서 파일 존재 여부 확인
-            if (File.Exists(fileInfo.FullPath))
+            var results = new List<FMFileInfo>();
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
-                results.Add(fileInfo);
+                var fileInfo = BuildFileInfo(reader);
+
+                if (File.Exists(fileInfo.FullPath))
+                {
+                    results.Add(fileInfo);
+                }
+                else
+                {
+                    await RemoveFileAsync(fileInfo.FullPath);
+                }
             }
-            else
-            {
-                // 파일이 실제로 존재하지 않으면 인덱스에서 제거
-                await RemoveFileAsync(fileInfo.FullPath);
-            }
+
+            return results;
         }
-
-        return results;
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error searching files: {ex.Message}");
+            return Enumerable.Empty<FMFileInfo>();
+        }
     }
 
     public async Task RemoveFileAsync(string fullPath)
     {
-        using var command = _connection.CreateCommand();
-        command.CommandText = "DELETE FROM FileIndex WHERE FullPath = @FullPath";
-        command.Parameters.AddWithValue("@FullPath", fullPath);
-        await command.ExecuteNonQueryAsync();
-        _fileHashCache.TryRemove(fullPath, out _);
+        try
+        {
+            EnsureConnectionOpen();
+            using var command = _connection.CreateCommand();
+            command.CommandText = "DELETE FROM FileIndex WHERE FullPath = @FullPath";
+            command.Parameters.AddWithValue("@FullPath", fullPath);
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error removing file from index: {ex.Message}");
+        }
+        finally
+        {
+            _fileHashCache.TryRemove(fullPath, out _);
+        }
     }
 
     public async Task<int> GetFileCountAsync(string path)
     {
-        EnsureConnectionOpen();
+        try
+        {
+            EnsureConnectionOpen();
+            using var command = _connection.CreateCommand();
 
-        using var command = _connection.CreateCommand();
+            bool isDrive = path.EndsWith(":") || path.EndsWith(":/") || path.EndsWith(@":\");
+            string queryPath = isDrive ? $"{path}%" : $"{path.TrimEnd('/', '\\')}%";
 
-        // 드라이브인지 폴더인지에 따라 경로 확인 및 쿼리 작성
-        bool isDrive = path.EndsWith(":") || path.EndsWith(":/") || path.EndsWith(@":\");
-        string queryPath = isDrive ? $"{path}%" : $"{path.TrimEnd('/', '\\')}%"; // 드라이브나 폴더에 따라 쿼리 경로 설정
+            command.CommandText = @"
+            SELECT COUNT(*)
+            FROM FileIndex
+            WHERE FullPath LIKE @Path";
+            command.Parameters.AddWithValue("@Path", queryPath);
 
-        command.CommandText = @"
-        SELECT COUNT(*)
-        FROM FileIndex
-        WHERE FullPath LIKE @Path";
-        command.Parameters.AddWithValue("@Path", queryPath);
-
-        var result = await command.ExecuteScalarAsync();
-
-        return Convert.ToInt32(result);
+            var result = await command.ExecuteScalarAsync();
+            return Convert.ToInt32(result);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error getting file count: {ex.Message}");
+            return 0;
+        }
     }
 
     public async Task ClearDatabaseAsync()
     {
-        EnsureConnectionOpen();
-        using var command = _connection.CreateCommand();
-        command.CommandText = "DELETE FROM FileIndex";
-        await command.ExecuteNonQueryAsync();
-        _fileHashCache.Clear();
+        try
+        {
+            EnsureConnectionOpen();
+            using var command = _connection.CreateCommand();
+            command.CommandText = "DELETE FROM FileIndex";
+            await command.ExecuteNonQueryAsync();
+            _fileHashCache.Clear();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error clearing database: {ex.Message}");
+        }
     }
 
     public void Dispose()

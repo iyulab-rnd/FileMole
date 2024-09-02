@@ -9,7 +9,7 @@ public class FileMoleEventArgs : EventArgs
     public WatcherChangeTypes ChangeType { get; }
     public bool IsDirectory { get; }
 
-    internal FileMoleEventArgs(FileSystemEvent internalEvent)
+    public FileMoleEventArgs(FileSystemEvent internalEvent)
     {
         FullPath = internalEvent.FullPath;
         OldFullPath = internalEvent.OldFullPath;
