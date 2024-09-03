@@ -67,7 +67,7 @@ public class FileIndexer : IDisposable, IAsyncDisposable
 
         try
         {
-            EnsureConnectionOpen();
+            EnsureConnectionOpen(); // 연결이 열려 있는지 확인
 
             string fileHash = await GetFileHashAsync(file.FullPath, file.LastWriteTime);
             var existingFile = await GetIndexedFileInfoAsync(file.FullPath);
@@ -100,8 +100,10 @@ public class FileIndexer : IDisposable, IAsyncDisposable
             command.Parameters.AddWithValue("@FileHash", fileHash);
             command.Parameters.AddWithValue("@LastFileHash", lastFileHash);
 
-            await command.ExecuteNonQueryAsync();
+            await command.ExecuteNonQueryAsync(); // 명령 실행
+
             _fileHashCache[file.FullPath] = (fileHash, file.LastWriteTime);
+
             return true;
         }
         catch (Exception ex)

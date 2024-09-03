@@ -77,29 +77,36 @@ public class FileMole : IDisposable
 
     private async Task HandleFileEventAsync(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
     {
-        raiseEvent(e);
-        var directoryPath = Path.GetDirectoryName(e.FullPath)!;
-        if (_moleTracks.TryGetValue(directoryPath, out var moleTrack))
+        try
         {
-            if (e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed)
+            raiseEvent(e);
+            var directoryPath = Path.GetDirectoryName(e.FullPath)!;
+            if (_moleTracks.TryGetValue(directoryPath, out var moleTrack))
             {
-                if (moleTrack.ShouldTrackFile(e.FullPath))
+                if (e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed)
                 {
-                    await _moleTrackDebouncer.DebounceAsync(e.FullPath, e);
+                    if (moleTrack.ShouldTrackFile(e.FullPath))
+                    {
+                        await _moleTrackDebouncer.DebounceAsync(e.FullPath, e);
+                    }
+                }
+                else if (e.ChangeType == WatcherChangeTypes.Deleted)
+                {
+                    await moleTrack.RemoveFileAsync(e.FullPath);
+                }
+                else if (e.ChangeType == WatcherChangeTypes.Renamed)
+                {
+                    await moleTrack.RemoveFileAsync(e.OldFullPath!);
+                    if (moleTrack.ShouldTrackFile(e.FullPath))
+                    {
+                        await _moleTrackDebouncer.DebounceAsync(e.FullPath, e);
+                    }
                 }
             }
-            else if (e.ChangeType == WatcherChangeTypes.Deleted)
-            {
-                await moleTrack.RemoveFileAsync(e.FullPath);
-            }
-            else if (e.ChangeType == WatcherChangeTypes.Renamed)
-            {
-                await moleTrack.RemoveFileAsync(e.OldFullPath!);
-                if (moleTrack.ShouldTrackFile(e.FullPath))
-                {
-                    await _moleTrackDebouncer.DebounceAsync(e.FullPath, e);
-                }
-            }
+        }
+        catch (Exception)
+        {
+            return;
         }
     }
 
@@ -154,27 +161,27 @@ public class FileMole : IDisposable
 
     public async Task<FMFileInfo> GetFileAsync(string filePath)
     {
-        if (_storageProviders.TryGetValue(filePath, out var provider))
+        var provider = GetProviderForPath(filePath);
+        if (provider != null)
         {
             return await provider.GetFileAsync(filePath);
         }
         else
         {
-            var localProvider = new LocalStorageProvider();
-            return await localProvider.GetFileAsync(filePath);
+            throw new ArgumentException($"No storage provider found for filePath: {filePath}");
         }
     }
 
     public async Task<IEnumerable<FMFileInfo>> GetFilesAsync(string path)
     {
-        if (_storageProviders.TryGetValue(path, out var provider))
+        var provider = GetProviderForPath(path);
+        if (provider != null)
         {
             return await provider.GetFilesAsync(path);
         }
         else
         {
-            var localProvider = new LocalStorageProvider();
-            return await provider.GetFilesAsync(path);
+            throw new ArgumentException($"No storage provider found for path: {path}");
         }
     }
 
@@ -205,14 +212,14 @@ public class FileMole : IDisposable
 
     public async Task<IEnumerable<FMDirectoryInfo>> GetDirectoriesAsync(string path)
     {
-        if (_storageProviders.TryGetValue(path, out var provider))
+        var provider = GetProviderForPath(path);
+        if (provider != null)
         {
             return await provider.GetDirectoriesAsync(path);
         }
         else
         {
-            var localProvider = new LocalStorageProvider();
-            return await localProvider.GetDirectoriesAsync(path);
+            throw new ArgumentException($"No storage provider found for path: {path}");
         }
     }
 
@@ -409,6 +416,15 @@ public class FileMole : IDisposable
             moleTrack.Dispose();
             _moleTracks.Remove(directoryPath);
         }
+    }
+
+    private IStorageProvider? GetProviderForPath(string path)
+    {
+        return _storageProviders
+            .Where(kvp => path.StartsWith(kvp.Key, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(kvp => kvp.Key.Length)
+            .Select(kvp => kvp.Value)
+            .FirstOrDefault();
     }
 
     public void Dispose()
