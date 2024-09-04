@@ -54,6 +54,8 @@ public class TextDiffStrategy : IDiffStrategy
             position += line.Text.Length + 1; // +1 for newline
         }
 
+        result.IsChanged = result.Entries.Any(e => e.Type != DiffType.Unchanged);
+
         return result;
     }
 

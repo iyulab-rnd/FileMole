@@ -26,6 +26,8 @@ public class BinaryDiffStrategy : IDiffStrategy
             AreIdentical = oldHash == newHash
         };
 
+        result.IsChanged = !result.AreIdentical;
+
         return result;
     }
 

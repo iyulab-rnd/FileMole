@@ -75,6 +75,8 @@ public class OdfDiffStrategy : IDiffStrategy
             });
         }
 
+        result.IsChanged = result.Entries.Any(e => e.TextDiffs.Any(td => td.Type != DiffType.Unchanged));
+
         return result;
     }
 

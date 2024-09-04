@@ -173,7 +173,7 @@ public class FileMole : IDisposable
                     try
                     {
                         var diff = await moleTrack.TrackAndGetDiffAsync(e.FullPath);
-                        if (diff == null) continue;
+                        if (diff == null || diff.IsChanged == false) continue;
 
                         FileContentChanged?.Invoke(this, new FileContentChangedEventArgs(e, diff));
                     }
