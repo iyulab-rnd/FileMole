@@ -1,33 +1,25 @@
 ﻿using System.Security;
-using System.Security.AccessControl;
 using System.IO;
 
 namespace FileMoles.Storage;
 
 public class LocalStorageProvider : IStorageProvider
 {
-    public Task<FMFileInfo> GetFileAsync(string filePath)
+    public Task<FileInfo> GetFileAsync(string filePath)
     {
-        return Task.Run(() =>
-        {
-            var fileInfo = new FileInfo(filePath);
-            return FMFileInfo.FromFileInfo(fileInfo);
-        });
+        return Task.Run(() => new FileInfo(filePath));
     }
 
-    public async Task<IEnumerable<FMFileInfo>> GetFilesAsync(string path)
+    public async Task<IEnumerable<FileInfo>> GetFilesAsync(string path)
     {
         return await Task.Run(() =>
         {
-            var files = new List<FMFileInfo>();
+            var files = new List<FileInfo>();
             var directoryInfo = new DirectoryInfo(path);
 
             try
             {
-                foreach (var fileInfo in directoryInfo.EnumerateFiles())
-                {
-                    files.Add(FMFileInfo.FromFileInfo(fileInfo));
-                }
+                files.AddRange(directoryInfo.EnumerateFiles());
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -46,26 +38,16 @@ public class LocalStorageProvider : IStorageProvider
         });
     }
 
-    public async Task<IEnumerable<FMDirectoryInfo>> GetDirectoriesAsync(string path)
+    public async Task<IEnumerable<DirectoryInfo>> GetDirectoriesAsync(string path)
     {
         return await Task.Run(() =>
         {
-            var directories = new List<FMDirectoryInfo>();
+            var directories = new List<DirectoryInfo>();
             var directoryInfo = new DirectoryInfo(path);
 
             try
             {
-                foreach (var dirInfo in directoryInfo.EnumerateDirectories())
-                {
-                    directories.Add(new FMDirectoryInfo(
-                        dirInfo.Name,
-                        dirInfo.FullName,
-                        dirInfo.CreationTime,
-                        dirInfo.LastWriteTime,
-                        dirInfo.LastAccessTime,
-                        dirInfo.Attributes
-                    ));
-                }
+                directories.AddRange(directoryInfo.EnumerateDirectories());
             }
             catch (UnauthorizedAccessException ex)
             {

@@ -6,15 +6,15 @@ namespace FileMoles.Diff;
 
 public class TextDiffResult : DiffResult
 {
-    public List<TextDiffEntry> Entries { get; set; } = new List<TextDiffEntry>();
+    public List<TextDiffEntry> Entries { get; set; } = [];
 }
 
 public class TextDiffEntry
 {
     public int StartPosition { get; set; }
     public int EndPosition { get; set; }
-    public string OriginalText { get; set; }
-    public string ModifiedText { get; set; }
+    public string? OriginalText { get; set; }
+    public string? ModifiedText { get; set; }
     public DiffType Type { get; set; }
 }
 
@@ -57,7 +57,7 @@ public class TextDiffStrategy : IDiffStrategy
         return result;
     }
 
-    private DiffType ConvertDiffType(ChangeType changeType)
+    private static DiffType ConvertDiffType(ChangeType changeType)
     {
         return changeType switch
         {

@@ -52,7 +52,7 @@ namespace FileMoles.Tests
             DiffResult? diff = null;
             var diffCalculated = new TaskCompletionSource<bool>();
 
-            void OnMoleTrackChanged(object? sender, FileMoleTrackChangedEventArgs e)
+            void OnMoleTrackChanged(object? sender, FileContentChangedEventArgs e)
             {
                 if (e.FullPath == filePath)
                 {
@@ -61,7 +61,7 @@ namespace FileMoles.Tests
                 }
             }
 
-            _fileMole.MoleTrackChanged += OnMoleTrackChanged;
+            _fileMole.FileContentChanged += OnMoleTrackChanged;
 
             try
             {
@@ -87,7 +87,7 @@ namespace FileMoles.Tests
             }
             finally
             {
-                _fileMole.MoleTrackChanged -= OnMoleTrackChanged;
+                _fileMole.FileContentChanged -= OnMoleTrackChanged;
             }
         }
 

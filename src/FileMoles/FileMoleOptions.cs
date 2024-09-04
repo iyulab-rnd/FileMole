@@ -4,8 +4,8 @@ public class FileMoleOptions
 {
     public List<Mole> Moles { get; set; } = [];
     public string? DatabasePath { get; set; }
-    public int DebounceTime { get; set; } = 60000; // 1 minute
-    public long MaxFileSizeBytes { get; set; } = 200 * 1024 * 1024; // 200 MB
+    public int DebounceTime { get; set; } = 60_000 * 1; // 1 minute
+    public long MaxFileSizeBytes { get; set; } = 1024 * 1024 * 200; // 200 MB (1KB * 1MB * 200)
 }
 
 public class Mole

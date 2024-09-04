@@ -26,11 +26,7 @@ public class FileIndexerTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var options = new FileMoleOptions
-        {
-            DatabasePath = _dbPath
-        };
-        _indexer = new FileIndexer(options);
+        _indexer = new FileIndexer(_dbPath);
         await _indexer.ClearDatabaseAsync();
     }
 
@@ -60,8 +56,7 @@ public class FileIndexerTests : IAsyncLifetime
     public async Task IndexFileAsync_ShouldIndexFile()
     {
         var filePath = Path.Combine(_testDirectory, "file1.txt");
-        var fileInfo = new FileInfo(filePath);
-        var file = FMFileInfo.FromFileInfo(fileInfo);
+        var file = new FileInfo(filePath);
 
         await _indexer.IndexFileAsync(file);
 
@@ -73,8 +68,8 @@ public class FileIndexerTests : IAsyncLifetime
     [Fact]
     public async Task SearchAsync_ShouldReturnCorrectResults()
     {
-        var file1 = FMFileInfo.FromFileInfo(new FileInfo(Path.Combine(_testDirectory, "file1.txt")));
-        var file2 = FMFileInfo.FromFileInfo(new FileInfo(Path.Combine(_testDirectory, "file2.txt")));
+        var file1 = new FileInfo(Path.Combine(_testDirectory, "file1.txt"));
+        var file2 = new FileInfo(Path.Combine(_testDirectory, "file2.txt"));
         await _indexer.IndexFileAsync(file1);
         await _indexer.IndexFileAsync(file2);
 
@@ -89,36 +84,11 @@ public class FileIndexerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task IndexFileAsync_ShouldUpdateExistingFile()
-    {
-        var filePath = Path.Combine(_testDirectory, "updatefile.txt");
-        File.WriteAllText(filePath, "Initial content");
-        var initialFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
-        await _indexer.IndexFileAsync(initialFile);
-
-        var initialFileInfo = await _indexer.GetIndexedFileInfoAsync(filePath);
-        var initialHash = initialFileInfo.FileHash;
-
-        await Task.Delay(1000); // 파일 수정 시간이 확실히 변경되도록 대기
-
-        File.WriteAllText(filePath, "Updated content with more text");
-        var updatedFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
-        await _indexer.IndexFileAsync(updatedFile);
-
-        var updatedFileInfo = await _indexer.GetIndexedFileInfoAsync(filePath);
-        var updatedHash = updatedFileInfo.FileHash;
-
-        Assert.NotEqual(initialFile.Size, updatedFileInfo.Size);
-        Assert.NotEqual(initialHash, updatedHash);
-        Assert.NotEqual(initialFile.LastWriteTime, updatedFileInfo.LastWriteTime);
-    }
-
-    [Fact]
     public async Task HasFileChangedAsync_ShouldDetectChanges()
     {
         var filePath = Path.Combine(_testDirectory, "changingfile.txt");
         File.WriteAllText(filePath, "Initial content");
-        var initialFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
+        var initialFile = new FileInfo(filePath);
         await _indexer.IndexFileAsync(initialFile);
 
         Assert.False(await _indexer.HasFileChangedAsync(initialFile));
@@ -126,19 +96,20 @@ public class FileIndexerTests : IAsyncLifetime
         await Task.Delay(1000); // 파일 수정 시간이 확실히 변경되도록 대기
 
         File.WriteAllText(filePath, "Modified content");
-        var modifiedFile = FMFileInfo.FromFileInfo(new FileInfo(filePath));
+        var modifiedFile = new FileInfo(filePath);
 
-        Assert.True(await _indexer.HasFileChangedAsync(modifiedFile));
+        var r = await _indexer.HasFileChangedAsync(modifiedFile);
+        Assert.True(r);
     }
 
     [Fact]
     public async Task RemoveFileAsync_ShouldRemoveFileFromIndex()
     {
         var filePath = Path.Combine(_testDirectory, "file1.txt");
-        var file = FMFileInfo.FromFileInfo(new FileInfo(filePath));
+        var file = new FileInfo(filePath);
         await _indexer.IndexFileAsync(file);
 
-        await _indexer.RemoveFileAsync(file.FullPath);
+        await _indexer.RemoveFileAsync(file.FullName);
 
         var result = await _indexer.SearchAsync("file1.txt");
         Assert.Empty(result);
@@ -147,9 +118,8 @@ public class FileIndexerTests : IAsyncLifetime
     [Fact]
     public async Task GetFileCountAsync_ShouldReturnCorrectCount()
     {
-        // 테스트 디렉터리의 파일 정보를 가져와 FMFileInfo 객체로 변환
         var files = Directory.GetFiles(_testDirectory)
-                             .Select(f => FMFileInfo.FromFileInfo(new FileInfo(f)))
+                             .Select(f => new FileInfo(f))
                              .ToArray();
 
         // 모든 파일을 인덱싱
@@ -169,7 +139,7 @@ public class FileIndexerTests : IAsyncLifetime
     public async Task ClearDatabaseAsync_ShouldRemoveAllEntries()
     {
         var files = Directory.GetFiles(_testDirectory)
-                             .Select(f => FMFileInfo.FromFileInfo(new FileInfo(f)))
+                             .Select(f => new FileInfo(f))
                              .ToArray();
 
         foreach (var file in files)

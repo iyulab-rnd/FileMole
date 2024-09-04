@@ -82,6 +82,4 @@ public class LocalStorageProviderTests : IDisposable
         // Assert
         Assert.False(File.Exists(file));
     }
-
-    // Add more tests for other methods...
 }

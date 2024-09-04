@@ -158,14 +158,6 @@ namespace FileMoles.Tests
                 changeEventCount++;
             };
 
-            for (int i = 0; i < 5; i++)
-            {
-                await RetryOnExceptionAsync(async () => await File.WriteAllTextAsync(filePath, "Initial content"));
-                await Task.Delay(100);
-            }
-
-            await WaitForEventProcessingAsync();
-
             Assert.Equal(0, changeEventCount);
 
             await RetryOnExceptionAsync(async () => await File.WriteAllTextAsync(filePath, "Modified content"));

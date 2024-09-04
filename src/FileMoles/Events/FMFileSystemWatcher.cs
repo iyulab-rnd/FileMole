@@ -9,13 +9,18 @@ internal class FMFileSystemWatcher : IDisposable
     private readonly Dictionary<string, FileSystemWatcher> _watchers = [];
     private readonly IgnoreManager _ignoreManager;
     private readonly FileIndexer _fileIndexer;
-    private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(300);
+    private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(400);
     private readonly ConcurrentDictionary<string, DateTime> _lastEventTime = new();
 
     internal event EventHandler<FileSystemEvent>? FileCreated;
     internal event EventHandler<FileSystemEvent>? FileChanged;
     internal event EventHandler<FileSystemEvent>? FileDeleted;
     internal event EventHandler<FileSystemEvent>? FileRenamed;
+
+    internal event EventHandler<FileSystemEvent>? DirectoryCreated;
+    internal event EventHandler<FileSystemEvent>? DirectoryChanged;
+    internal event EventHandler<FileSystemEvent>? DirectoryDeleted;
+    internal event EventHandler<FileSystemEvent>? DirectoryRenamed;
 
     public FMFileSystemWatcher(FileIndexer fileIndexer)
     {
@@ -48,11 +53,18 @@ internal class FMFileSystemWatcher : IDisposable
     {
         if (!_ignoreManager.ShouldIgnore(e.FullPath))
         {
-            ProcessCreatedEventAsync(e.FullPath).Forget();
+            if (Directory.Exists(e.FullPath))
+            {
+                DirectoryCreated?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Created, e.FullPath));
+            }
+            else
+            {
+                ProcessCreatedEventAsync(e.FullPath).Forget();
+            }
         }
     }
 
-    private void OnChanged(object sender, FileSystemEventArgs e)
+    private async void OnChanged(object sender, FileSystemEventArgs e)
     {
         if (!_ignoreManager.ShouldIgnore(e.FullPath))
         {
@@ -61,11 +73,23 @@ internal class FMFileSystemWatcher : IDisposable
 
             if (now - lastEventTime < _debouncePeriod)
             {
-                return; // 디바운스 기간 내에 연속된 변경 이벤트를 무시
+                return;
             }
 
             _lastEventTime[e.FullPath] = now;
-            ProcessChangedEventAsync(e.FullPath).Forget();
+
+            if (Directory.Exists(e.FullPath))
+            {
+                DirectoryChanged?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Changed, e.FullPath));
+            }
+            else
+            {
+                var fileInfo = new FileInfo(e.FullPath);
+                if (await _fileIndexer.HasFileChangedAsync(fileInfo))
+                {
+                    ProcessChangedEventAsync(e.FullPath).Forget();
+                }
+            }
         }
     }
 
@@ -73,7 +97,14 @@ internal class FMFileSystemWatcher : IDisposable
     {
         if (!_ignoreManager.ShouldIgnore(e.FullPath))
         {
-            ProcessDeletedEventAsync(e.FullPath).Forget();
+            if (e.FullPath.EndsWith(Path.DirectorySeparatorChar.ToString()))
+            {
+                DirectoryDeleted?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Deleted, e.FullPath));
+            }
+            else
+            {
+                ProcessDeletedEventAsync(e.FullPath).Forget();
+            }
         }
     }
 
@@ -81,7 +112,14 @@ internal class FMFileSystemWatcher : IDisposable
     {
         if (!_ignoreManager.ShouldIgnore(e.FullPath) && !_ignoreManager.ShouldIgnore(e.OldFullPath))
         {
-            ProcessRenamedEventAsync(e.OldFullPath, e.FullPath).Forget();
+            if (Directory.Exists(e.FullPath))
+            {
+                DirectoryRenamed?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Renamed, e.FullPath, e.OldFullPath));
+            }
+            else
+            {
+                ProcessRenamedEventAsync(e.OldFullPath, e.FullPath).Forget();
+            }
         }
     }
 
@@ -90,8 +128,7 @@ internal class FMFileSystemWatcher : IDisposable
         var fileInfo = new FileInfo(fullPath);
         if (fileInfo.Exists)
         {
-            var fmFileInfo = FMFileInfo.FromFileInfo(fileInfo);
-            await _fileIndexer.IndexFileAsync(fmFileInfo);
+            await _fileIndexer.IndexFileAsync(fileInfo);
             FileCreated?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Created, fullPath));
         }
     }
@@ -104,12 +141,8 @@ internal class FMFileSystemWatcher : IDisposable
             return; // 파일이 삭제되었거나 접근할 수 없는 경우
         }
 
-        var fmFileInfo = FMFileInfo.FromFileInfo(fileInfo);
-        if (await _fileIndexer.HasFileChangedAsync(fmFileInfo))
-        {
-            await _fileIndexer.IndexFileAsync(fmFileInfo);
-            FileChanged?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Changed, fullPath));
-        }
+        await _fileIndexer.IndexFileAsync(fileInfo);
+        FileChanged?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Changed, fullPath));
     }
 
     private async Task ProcessDeletedEventAsync(string fullPath)
@@ -124,8 +157,7 @@ internal class FMFileSystemWatcher : IDisposable
         var fileInfo = new FileInfo(newPath);
         if (fileInfo.Exists)
         {
-            var fmFileInfo = FMFileInfo.FromFileInfo(fileInfo);
-            await _fileIndexer.IndexFileAsync(fmFileInfo);
+            await _fileIndexer.IndexFileAsync(fileInfo);
         }
         FileRenamed?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Renamed, newPath, oldPath));
     }

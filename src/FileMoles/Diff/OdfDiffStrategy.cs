@@ -6,14 +6,14 @@ namespace FileMoles.Diff;
 
 public class OdfDiffResult : DiffResult
 {
-    public List<OdfDiffEntry> Entries { get; set; } = new List<OdfDiffEntry>();
+    public List<OdfDiffEntry> Entries { get; set; } = [];
 }
 
 public class OdfDiffEntry
 {
-    public string ElementType { get; set; } // e.g., "Paragraph", "Cell", etc.
-    public string ElementIdentifier { get; set; } // e.g., paragraph number, cell reference
-    public List<TextDiffEntry> TextDiffs { get; set; } = new List<TextDiffEntry>();
+    public string? ElementType { get; set; } // e.g., "Paragraph", "Cell", etc.
+    public string? ElementIdentifier { get; set; } // e.g., paragraph number, cell reference
+    public List<TextDiffEntry> TextDiffs { get; set; } = [];
 }
 
 public class OdfDiffStrategy : IDiffStrategy
@@ -45,9 +45,9 @@ public class OdfDiffStrategy : IDiffStrategy
                         TextDiffs = currentElementDiffs
                     });
                 }
-                currentElement = line.Text.Substring(13);
+                currentElement = line.Text[13..];
                 elementCount++;
-                currentElementDiffs = new List<TextDiffEntry>();
+                currentElementDiffs = [];
             }
             else
             {
@@ -85,7 +85,7 @@ public class OdfDiffStrategy : IDiffStrategy
         return await Task.FromResult("Extracted ODF content");
     }
 
-    private DiffType ConvertDiffType(ChangeType changeType)
+    private static DiffType ConvertDiffType(ChangeType changeType)
     {
         return changeType switch
         {

@@ -4,8 +4,8 @@ public class BinaryDiffResult : DiffResult
 {
     public long OldFileSize { get; set; }
     public long NewFileSize { get; set; }
-    public string OldFileHash { get; set; }
-    public string NewFileHash { get; set; }
+    public string? OldFileHash { get; set; }
+    public string? NewFileHash { get; set; }
     public bool AreIdentical { get; set; }
 }
 
@@ -29,7 +29,7 @@ public class BinaryDiffStrategy : IDiffStrategy
         return result;
     }
 
-    private async Task<string> CalculateFileHashAsync(string filePath)
+    private static async Task<string> CalculateFileHashAsync(string filePath)
     {
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         using var stream = File.OpenRead(filePath);

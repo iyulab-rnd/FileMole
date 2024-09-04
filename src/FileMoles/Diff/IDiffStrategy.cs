@@ -11,5 +11,5 @@ public interface IDiffStrategy
 
 public abstract class DiffResult
 {
-    public string FileType { get; set; }
+    public string? FileType { get; set; }
 }

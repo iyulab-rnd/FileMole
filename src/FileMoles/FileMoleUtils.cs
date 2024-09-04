@@ -1,5 +1,4 @@
-﻿using System.Security.Cryptography;
-using System.Text;
+﻿using FileMoles.Storage;
 using MimeKit;
 
 namespace FileMoles;
@@ -20,7 +19,7 @@ internal static class FileMoleUtils
         var file = new FileInfo(filePath);
         // 파일이 숨김 속성을 가지거나 파일/폴더명이 '.'으로 시작하는 경우 숨김으로 처리
         if ((file.Attributes & FileAttributes.Hidden) == FileAttributes.Hidden ||
-            file.Name.StartsWith("."))
+            file.Name.StartsWith('.'))
         {
             return true;
         }
@@ -43,5 +42,18 @@ internal static class FileMoleUtils
         using var sourceStream = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
         using var destinationStream = new FileStream(destinationFile, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous);
         await sourceStream.CopyToAsync(destinationStream);
+    }
+
+    internal static IStorageProvider CreateStorageProvider(MoleType type, string provider)
+    {
+        return (type, provider?.ToLower()) switch
+        {
+            (MoleType.Local, _) => new LocalStorageProvider(),
+            (MoleType.Remote, _) => new RemoteStorageProvider(),
+            (MoleType.Cloud, "onedrive") => new OneDriveStorageProvider(),
+            (MoleType.Cloud, "google") => new GoogleDriveStorageProvider(),
+            (MoleType.Cloud, _) => throw new NotSupportedException($"Unsupported cloud provider: {provider}"),
+            _ => throw new NotSupportedException($"Unsupported storage type: {type}")
+        };
     }
 }

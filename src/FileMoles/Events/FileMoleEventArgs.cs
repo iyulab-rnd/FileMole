@@ -1,6 +1,4 @@
-﻿using FileMoles.Events;
-
-namespace FileMoles;
+﻿namespace FileMoles.Events;
 
 public class FileMoleEventArgs : EventArgs
 {
