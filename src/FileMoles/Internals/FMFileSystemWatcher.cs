@@ -1,8 +1,9 @@
 ﻿using System.Collections.Concurrent;
 using FileMoles.Utils;
 using FileMoles.Indexing;
+using FileMoles.Events;
 
-namespace FileMoles.Events;
+namespace FileMoles.Internals;
 
 internal class FMFileSystemWatcher : IDisposable
 {
@@ -11,6 +12,7 @@ internal class FMFileSystemWatcher : IDisposable
     private readonly FileIndexer _fileIndexer;
     private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(400);
     private readonly ConcurrentDictionary<string, DateTime> _lastEventTime = new();
+    private readonly ConcurrentDictionary<string, Task> _processingTasks = new();
 
     internal event EventHandler<FileSystemEvent>? FileCreated;
     internal event EventHandler<FileSystemEvent>? FileChanged;
@@ -24,7 +26,7 @@ internal class FMFileSystemWatcher : IDisposable
 
     public FMFileSystemWatcher(FileMoleOptions options, FileIndexer fileIndexer)
     {
-        _ignoreManager = new IgnoreManager(Path.Combine(options.GetDataPath(), Constants.FileMoleIgnoreFile));
+        _ignoreManager = new IgnoreManager(Path.Combine(options.GetDataPath(), ".ignore"));
         _fileIndexer = fileIndexer;
     }
 
@@ -71,11 +73,6 @@ internal class FMFileSystemWatcher : IDisposable
             var now = DateTime.UtcNow;
             var lastEventTime = _lastEventTime.GetOrAdd(e.FullPath, now);
 
-            if (now - lastEventTime < _debouncePeriod)
-            {
-                return;
-            }
-
             _lastEventTime[e.FullPath] = now;
 
             if (Directory.Exists(e.FullPath))
@@ -84,13 +81,33 @@ internal class FMFileSystemWatcher : IDisposable
             }
             else
             {
-                var fileInfo = new FileInfo(e.FullPath);
-                if (await _fileIndexer.HasFileChangedAsync(fileInfo))
-                {
-                    ProcessChangedEventAsync(e.FullPath).Forget();
-                }
+                await _processingTasks.AddOrUpdate(
+                    e.FullPath,
+                    _ => ProcessFileChangeAsync(e.FullPath, now),
+                    (_, existingTask) => existingTask.IsCompleted ? ProcessFileChangeAsync(e.FullPath, now) : existingTask
+                );
             }
         }
+    }
+
+    private async Task ProcessFileChangeAsync(string fullPath, DateTime eventTime)
+    {
+        await Task.Delay(_debouncePeriod);
+
+        if (_lastEventTime.TryGetValue(fullPath, out var lastTime) && lastTime > eventTime)
+        {
+            // 더 최근의 이벤트가 발생했지만, 여전히 변경 사항을 처리합니다.
+            eventTime = lastTime;
+        }
+
+        var fileInfo = new FileInfo(fullPath);
+        if (fileInfo.Exists && await _fileIndexer.HasFileChangedAsync(fileInfo))
+        {
+            await _fileIndexer.IndexFileAsync(fileInfo);
+            FileChanged?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Changed, fullPath));
+        }
+
+        _processingTasks.TryRemove(fullPath, out _);
     }
 
     private void OnDeleted(object sender, FileSystemEventArgs e)

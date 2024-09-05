@@ -1,4 +1,10 @@
-﻿namespace FileMoles.Tests;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Xunit;
+
+namespace FileMoles.Tests;
 
 public class FileMoleMonitoringTests
 {
@@ -74,7 +80,7 @@ public class FileMoleMonitoringTests
             // Assert
             Assert.True(eventRaised);
         }
-        catch (Exception)
+        finally
         {
             await TearDownTestEnvironment(testDir, fileMole);
         }
@@ -101,7 +107,7 @@ public class FileMoleMonitoringTests
             Assert.Single(results);
             Assert.Equal(filePath, results.First().FullName);
         }
-        catch (Exception)
+        finally
         {
             await TearDownTestEnvironment(testDir, fileMole);
         }
@@ -129,7 +135,7 @@ public class FileMoleMonitoringTests
             // Assert
             Assert.Equal(2, count);
         }
-        catch (Exception)
+        finally
         {
             await TearDownTestEnvironment(testDir, fileMole);
         }
@@ -161,7 +167,7 @@ public class FileMoleMonitoringTests
             // Assert
             Assert.True(eventRaised);
         }
-        catch (Exception)
+        finally
         {
             await TearDownTestEnvironment(testDir, fileMole);
         }
@@ -193,7 +199,54 @@ public class FileMoleMonitoringTests
             // Assert
             Assert.True(eventRaised);
         }
-        catch (Exception)
+        finally
+        {
+            await TearDownTestEnvironment(testDir, fileMole);
+        }
+    }
+
+    [Fact]
+    public async Task ConfigManager_ShouldTrackFile()
+    {
+        var (testDir, fileMole) = await SetupTestEnvironment();
+
+        try
+        {
+            // Arrange
+            var filePath = Path.Combine(testDir, "configtest.txt");
+            File.WriteAllText(filePath, "Test content");
+
+            // Act
+            bool shouldTrack = fileMole.Config.ShouldTrackFile(filePath);
+
+            // Assert
+            Assert.True(shouldTrack);
+        }
+        finally
+        {
+            await TearDownTestEnvironment(testDir, fileMole);
+        }
+    }
+
+    [Fact]
+    public async Task TrackingManager_ShouldTrackFile()
+    {
+        var (testDir, fileMole) = await SetupTestEnvironment();
+
+        try
+        {
+            // Arrange
+            var filePath = Path.Combine(testDir, "trackingtest.txt");
+            File.WriteAllText(filePath, "Test content");
+
+            // Act
+            await fileMole.Tracking.EnableAsync(filePath);
+            bool isTracked = fileMole.Config.ShouldTrackFile(filePath);
+
+            // Assert
+            Assert.True(isTracked);
+        }
+        finally
         {
             await TearDownTestEnvironment(testDir, fileMole);
         }

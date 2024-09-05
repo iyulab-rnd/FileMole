@@ -1,8 +1,7 @@
 ﻿using FileMoles.Storage;
 using FileMoles.Events;
 using FileMoles.Indexing;
-using System.Text.Json;
-using FileMoles.Utils;
+using FileMoles.Internals;
 
 namespace FileMoles;
 
@@ -12,9 +11,10 @@ public class FileMole : IDisposable
     private readonly FileIndexer _fileIndexer;
     private readonly FMFileSystemWatcher _fileSystemWatcher;
     private readonly Dictionary<string, IStorageProvider> _storageProviders;
-    private readonly Dictionary<string, FileMoleTrack> _moleTracks = [];
-    private readonly Debouncer<FileSystemEvent> _moleTrackDebouncer;
-    private readonly string _moleConfigPath;
+    private bool _disposed = false;
+
+    public ConfigManager Config { get; }
+    public TrackingManager Tracking { get; }
 
     // 감시 경로의 모든 파일, 디렉토리에 대한 이벤트를 수신하고 전파합니다.
     public event EventHandler<FileMoleEventArgs>? FileCreated;
@@ -40,13 +40,11 @@ public class FileMole : IDisposable
         _fileSystemWatcher = new FMFileSystemWatcher(options, _fileIndexer);
         _storageProviders = [];
 
-        _moleTrackDebouncer = new Debouncer<FileSystemEvent>(_options.DebounceTime, OnMoleTrackDebouncedEvents);
-
-        _moleConfigPath = Functions.GetTrackConfigPath(options.GetDataPath());
+        Config = new ConfigManager(Path.Combine(options.GetDataPath(), "config"));
+        Tracking = new TrackingManager(options.GetDataPath(), options.DebounceTime, OnFileContentChanged);
 
         InitializeStorageProviders();
         InitializeFileWatcher();
-        LoadMoleTrackConfig();
     }
 
     private void InitializeStorageProviders()
@@ -81,6 +79,12 @@ public class FileMole : IDisposable
         raiseEvent(e);
     }
 
+    private async Task HandleFileEventAsync(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
+    {
+        raiseEvent(e);
+        await Tracking.HandleFileEventAsync(e);
+    }
+
     private void RaiseDirectoryCreatedEvent(FileSystemEvent internalEvent)
     {
         var args = new FileMoleEventArgs(internalEvent);
@@ -105,68 +109,6 @@ public class FileMole : IDisposable
         DirectoryRenamed?.Invoke(this, args);
     }
 
-    private async Task HandleFileEventAsync(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
-    {
-        try
-        {
-            raiseEvent(e);
-            var directoryPath = Path.GetDirectoryName(e.FullPath)!;
-            if (_moleTracks.TryGetValue(directoryPath, out var moleTrack))
-            {
-                if (e.ChangeType == WatcherChangeTypes.Created || e.ChangeType == WatcherChangeTypes.Changed)
-                {
-                    if (moleTrack.ShouldTrackFile(e.FullPath))
-                    {
-                        await _moleTrackDebouncer.DebounceAsync(e.FullPath, e);
-                    }
-                }
-                else if (e.ChangeType == WatcherChangeTypes.Deleted)
-                {
-                    await moleTrack.RemoveFileAsync(e.FullPath);
-                }
-                else if (e.ChangeType == WatcherChangeTypes.Renamed)
-                {
-                    await moleTrack.RemoveFileAsync(e.OldFullPath!);
-                    if (moleTrack.ShouldTrackFile(e.FullPath))
-                    {
-                        await _moleTrackDebouncer.DebounceAsync(e.FullPath, e);
-                    }
-                }
-            }
-        }
-        catch (Exception)
-        {
-            return;
-        }
-    }
-
-    private async Task OnMoleTrackDebouncedEvents(IEnumerable<FileSystemEvent> events)
-    {
-        foreach (var e in events)
-        {
-            var directoryPath = Path.GetDirectoryName(e.FullPath)!;
-            if (_moleTracks.TryGetValue(directoryPath, out var moleTrack))
-            {
-                if (moleTrack.ShouldTrackFile(e.FullPath))
-                {
-                    try
-                    {
-                        var diff = await moleTrack.TrackAndGetDiffAsync(e.FullPath);
-                        if (diff != null && (diff.IsChanged || diff.IsInitial))
-                        {
-                            // 초기 백업 또는 변경사항이 있을 때 이벤트 발생
-                            FileContentChanged?.Invoke(this, new FileContentChangedEventArgs(e, diff));
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error processing file {e.FullPath}: {ex.Message}");
-                    }
-                }
-            }
-        }
-    }
-
     private void RaiseFileCreatedEvent(FileSystemEvent internalEvent)
     {
         var args = new FileMoleEventArgs(internalEvent);
@@ -189,6 +131,11 @@ public class FileMole : IDisposable
     {
         var args = new FileMoleEventArgs(internalEvent);
         FileRenamed?.Invoke(this, args);
+    }
+
+    private void OnFileContentChanged(object? sender, FileContentChangedEventArgs e)
+    {
+        FileContentChanged?.Invoke(this, e);
     }
 
     public async Task<FileInfo> GetFileAsync(string filePath)
@@ -292,6 +239,7 @@ public class FileMole : IDisposable
         {
             await ScanDirectoryAsync(mole.Path);
         }
+        await Tracking.SyncTrackingFilesAsync();
     }
 
     private async Task ScanDirectoryAsync(string path)
@@ -328,167 +276,6 @@ public class FileMole : IDisposable
             .FirstOrDefault();
     }
 
-    public async Task<bool> EnableMoleTrackAsync(string path)
-    {
-        if (File.Exists(path) || Directory.Exists(path))
-        {
-            await Task.Run(() => EnableMoleTrackForPath(path));
-            SaveMoleTrackConfig();
-            return true;
-        }
-        return false;
-    }
-
-    public async Task<bool> DisableMoleTrackAsync(string path)
-    {
-        if (_moleTracks.ContainsKey(path))
-        {
-            await Task.Run(() => DisableMoleTrackForPath(path));
-            SaveMoleTrackConfig();
-            return true;
-        }
-        return false;
-    }
-
-    public bool AddIgnorePattern(string path, string pattern)
-    {
-        if (_moleTracks.TryGetValue(path, out var moleTrack))
-        {
-            moleTrack.AddIgnorePattern(pattern);
-            return true;
-        }
-        return false;
-    }
-
-    public bool AddIncludePattern(string path, string pattern)
-    {
-        if (_moleTracks.TryGetValue(path, out var moleTrack))
-        {
-            moleTrack.AddIncludePattern(pattern);
-            return true;
-        }
-        return false;
-    }
-
-    public List<string> GetIgnorePatterns(string path)
-    {
-        if (_moleTracks.TryGetValue(path, out var moleTrack))
-        {
-            return moleTrack.GetIgnorePatterns();
-        }
-        return [];
-    }
-
-    public List<string> GetIncludePatterns(string path)
-    {
-        if (_moleTracks.TryGetValue(path, out var moleTrack))
-        {
-            return moleTrack.GetIncludePatterns();
-        }
-        return [];
-    }
-
-    public bool IsMoleTrackEnabled(string path)
-    {
-        return _moleTracks.ContainsKey(path);
-    }
-
-    public List<string> GetAllTrackedPaths()
-    {
-        return new List<string>(_moleTracks.Keys);
-    }
-
-    public async Task<List<string>> GetTrackedFilesAsync(string path)
-    {
-        if (_moleTracks.TryGetValue(path, out var moleTrack))
-        {
-            return await moleTrack.GetTrackedFilesAsync();
-        }
-        return [];
-    }
-
-    private void EnableMoleTrackForPath(string path)
-    {
-        if (File.Exists(path))
-        {
-            EnableMoleTrackForFile(path);
-        }
-        else if (Directory.Exists(path))
-        {
-            EnableMoleTrackForDirectory(path);
-        }
-    }
-
-    private void DisableMoleTrackForPath(string path)
-    {
-        if (_moleTracks.TryGetValue(path, out var moleTrack))
-        {
-            moleTrack.Dispose();
-            _moleTracks.Remove(path);
-        }
-    }
-
-    private void EnableMoleTrackForFile(string filePath)
-    {
-        var directoryPath = Path.GetDirectoryName(filePath)!;
-        if (!_moleTracks.TryGetValue(directoryPath, out FileMoleTrack? value))
-        {
-            value = new FileMoleTrack(directoryPath);
-            _moleTracks[directoryPath] = value;
-        }
-        value.AddTrackedFile(filePath);
-    }
-
-    private void EnableMoleTrackForDirectory(string directoryPath)
-    {
-        if (!_moleTracks.TryGetValue(directoryPath, out FileMoleTrack? _))
-        {
-            var value = new FileMoleTrack(directoryPath);
-            _moleTracks[directoryPath] = value;
-        }
-    }
-
-    private void SaveMoleTrackConfig()
-    {
-        var config = new FileMoleTrackConfig
-        {
-            TrackedPaths = new List<string>(_moleTracks.Keys)
-        };
-
-        FileSafe.WriteAllTextWithRetry(_moleConfigPath, JsonSerializer.Serialize(config));
-    }
-
-    private void LoadMoleTrackConfig()
-    {
-        if (File.Exists(_moleConfigPath))
-        {
-            var config = JsonSerializer.Deserialize<FileMoleTrackConfig>(File.ReadAllText(_moleConfigPath));
-            if (config == null) return;
-
-            var validPaths = new List<string>();
-
-            foreach (var trackedPath in config.TrackedPaths)
-            {
-                if (File.Exists(trackedPath) || Directory.Exists(trackedPath))
-                {
-                    EnableMoleTrackAsync(trackedPath).Forget();
-                    validPaths.Add(trackedPath);
-                }
-                else
-                {
-                    Console.WriteLine($"Warning: Tracked path no longer exists and will be removed from config: {trackedPath}");
-                }
-            }
-
-            // Update the config if any invalid paths were found
-            if (validPaths.Count != config.TrackedPaths.Count)
-            {
-                config.TrackedPaths = validPaths;
-                SaveMoleTrackConfig();
-            }
-        }
-    }
-
     public void Dispose()
     {
         Dispose(true);
@@ -497,20 +284,24 @@ public class FileMole : IDisposable
 
     protected virtual void Dispose(bool disposing)
     {
-        if (disposing)
+        if (!_disposed)
         {
-            _fileSystemWatcher.Dispose();
-            (_fileIndexer as IDisposable)?.Dispose();
-            foreach (var provider in _storageProviders.Values)
+            if (disposing)
             {
-                (provider as IDisposable)?.Dispose();
+                _fileSystemWatcher.Dispose();
+                (_fileIndexer as IDisposable)?.Dispose();
+                foreach (var provider in _storageProviders.Values)
+                {
+                    (provider as IDisposable)?.Dispose();
+                }
+                Tracking.Dispose();
+
+                // Ensure that all file handles are released
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
             }
-            _moleTrackDebouncer.Dispose();
-            foreach (var moleTrack in _moleTracks.Values)
-            {
-                moleTrack?.Dispose();
-            }
-            _moleTracks.Clear();
+
+            _disposed = true;
         }
     }
 }

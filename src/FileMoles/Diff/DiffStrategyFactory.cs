@@ -1,6 +1,6 @@
 ﻿using FileMoles.Diff;
-using FileMoles;
 using System.IO;
+using FileMoles.Internals;
 
 namespace FileMoles.Diff;
 

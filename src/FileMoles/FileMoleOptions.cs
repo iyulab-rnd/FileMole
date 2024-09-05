@@ -5,8 +5,13 @@ public class FileMoleOptions
 {
     public List<Mole> Moles { get; set; } = [];
     public string? DataPath { get; set; }
-    public int DebounceTime { get; set; } = 60_000 * 1; // 1 minute
+    /// <summary>
+    /// DebounceTime (milliseconds)
+    /// </summary>
+    public double DebounceTime { get; set; } = 1000 * 60 * 1; // 1 minute (1000ms * 60s * 1m)
     public long MaxFileSizeBytes { get; set; } = 1024 * 1024 * 200; // 200 MB (1KB * 1MB * 200)
+
+    public IEnumerable<string> DefaultImports { get; set; } = [];
 
     internal string GetDataPath()
     {

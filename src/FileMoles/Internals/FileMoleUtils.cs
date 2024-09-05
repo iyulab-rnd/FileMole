@@ -1,7 +1,7 @@
 ﻿using FileMoles.Storage;
 using MimeKit;
 
-namespace FileMoles;
+namespace FileMoles.Internals;
 
 internal static class FileMoleUtils
 {

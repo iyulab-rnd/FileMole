@@ -1,6 +1,6 @@
 ﻿using System.Text.RegularExpressions;
 
-namespace FileMoles.Utils;
+namespace FileMoles.Internals;
 
 internal class IgnoreManager
 {

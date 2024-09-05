@@ -1,12 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Runtime.CompilerServices;
-using System.Threading.Tasks;
-using FileMoles;
-using FileMoles.Events;
-using Xunit;
-
-namespace FileMoles.Tests
+﻿namespace FileMoles.Tests
 {
     public class FileMoleTrackingTests
     {
@@ -16,7 +8,7 @@ namespace FileMoles.Tests
             {
                 DataPath = Path.Combine(testDirectory, "FileMoleData"),
                 Moles = new List<Mole> { new Mole { Path = testDirectory, Type = MoleType.Local } },
-                DebounceTime = 200 // 테스트를 위해 짧게 설정
+                DebounceTime = 100 // 더 짧은 디바운스 시간으로 설정
             };
 
             return new FileMoleBuilder()
@@ -29,14 +21,14 @@ namespace FileMoles.Tests
             var testDirectory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             Directory.CreateDirectory(testDirectory);
             var fileMole = CreateFileMole(testDirectory);
-            await Task.Delay(100); // Short delay for setup
+            await Task.Delay(500); // 초기 설정을 위한 대기 시간 증가
             return (testDirectory, fileMole);
         }
 
         private async Task TearDownTestEnvironment(string testDirectory, FileMole fileMole)
         {
             fileMole.Dispose();
-            await Task.Delay(200); // Short delay for cleanup
+            await Task.Delay(500); // 정리를 위한 대기 시간 증가
             FileSafe.DeleteRetry(testDirectory);
         }
 
@@ -52,17 +44,27 @@ namespace FileMoles.Tests
                 File.WriteAllText(filePath, "Initial content");
 
                 var contentChangedRaised = false;
-                fileMole.FileContentChanged += (sender, args) => contentChangedRaised = true;
+                fileMole.FileContentChanged += (sender, args) =>
+                {
+                    contentChangedRaised = true;
+                    Console.WriteLine("FileContentChanged event raised");
+                };
+
+                await fileMole.Tracking.EnableAsync(filePath);
+                Console.WriteLine($"Tracking enabled for {filePath}");
 
                 // Act
-                await fileMole.EnableMoleTrackAsync(filePath);
                 File.WriteAllText(filePath, "Updated content");
+                Console.WriteLine($"File content updated: {filePath}");
 
                 // Wait for the event to be processed
-                await Task.Delay(1000);
+                for (int i = 0; i < 30 && !contentChangedRaised; i++)
+                {
+                    await Task.Delay(100);
+                }
 
                 // Assert
-                Assert.True(contentChangedRaised);
+                Assert.True(contentChangedRaised, "FileContentChanged event was not raised");
             }
             finally
             {
@@ -81,11 +83,11 @@ namespace FileMoles.Tests
                 var directoryPath = Path.Combine(testDir, "ignoretest");
                 Directory.CreateDirectory(directoryPath);
 
-                await fileMole.EnableMoleTrackAsync(directoryPath);
+                await fileMole.Tracking.EnableAsync(directoryPath);
 
                 // Act
-                fileMole.AddIgnorePattern(directoryPath, "*.tmp");
-                var ignorePatterns = fileMole.GetIgnorePatterns(directoryPath);
+                fileMole.Config.AddIgnorePattern("*.tmp");
+                var ignorePatterns = fileMole.Config.GetIgnorePatterns();
 
                 // Assert
                 Assert.Contains("*.tmp", ignorePatterns);
@@ -107,11 +109,11 @@ namespace FileMoles.Tests
                 var directoryPath = Path.Combine(testDir, "includetest");
                 Directory.CreateDirectory(directoryPath);
 
-                await fileMole.EnableMoleTrackAsync(directoryPath);
+                await fileMole.Tracking.EnableAsync(directoryPath);
 
                 // Act
-                fileMole.AddIncludePattern(directoryPath, "*.txt");
-                var includePatterns = fileMole.GetIncludePatterns(directoryPath);
+                fileMole.Config.AddIncludePattern("*.txt");
+                var includePatterns = fileMole.Config.GetIncludePatterns();
 
                 // Assert
                 Assert.Contains("*.txt", includePatterns);
@@ -132,9 +134,9 @@ namespace FileMoles.Tests
                 // Arrange
                 var directoryPath = Path.Combine(testDir, "ignoretest");
                 Directory.CreateDirectory(directoryPath);
-                await fileMole.EnableMoleTrackAsync(directoryPath);
+                await fileMole.Tracking.EnableAsync(directoryPath);
 
-                fileMole.AddIgnorePattern(directoryPath, "*.tmp");
+                fileMole.Config.AddIgnorePattern("*.tmp");
 
                 var ignoredFilePath = Path.Combine(directoryPath, "ignored.tmp");
                 var trackedFilePath = Path.Combine(directoryPath, "tracked.txt");
@@ -168,9 +170,9 @@ namespace FileMoles.Tests
                 // Arrange
                 var directoryPath = Path.Combine(testDir, "includetest");
                 Directory.CreateDirectory(directoryPath);
-                await fileMole.EnableMoleTrackAsync(directoryPath);
+                await fileMole.Tracking.EnableAsync(directoryPath);
 
-                fileMole.AddIncludePattern(directoryPath, "*.txt");
+                fileMole.Config.AddIncludePattern("*.txt");
 
                 var includedFilePath = Path.Combine(directoryPath, "included.txt");
                 var notIncludedFilePath = Path.Combine(directoryPath, "notincluded.tmp");

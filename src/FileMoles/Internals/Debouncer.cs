@@ -1,6 +1,6 @@
 ﻿using System.Timers;
 
-namespace FileMoles;
+namespace FileMoles.Internals;
 
 internal class Debouncer<T> : IDisposable
 {
