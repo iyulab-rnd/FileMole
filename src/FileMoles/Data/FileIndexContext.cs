@@ -26,22 +26,24 @@ internal class FileIndexContext
     {
         try
         {
-            using var connection = _dbContext.GetConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = @"
+            await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = @"
                 INSERT OR REPLACE INTO FileIndex 
                 (Name, FullPath, Size, CreationTime, LastWriteTime, LastAccessTime, Attributes) 
                 VALUES (@Name, @FullPath, @Size, @CreationTime, @LastWriteTime, @LastAccessTime, @Attributes)";
 
-            command.Parameters.AddWithValue("@Name", fileIndex.Name);
-            command.Parameters.AddWithValue("@FullPath", fileIndex.FullPath);
-            command.Parameters.AddWithValue("@Size", fileIndex.Length);
-            command.Parameters.AddWithValue("@CreationTime", fileIndex.CreationTime.ToString("o"));
-            command.Parameters.AddWithValue("@LastWriteTime", fileIndex.LastWriteTime.ToString("o"));
-            command.Parameters.AddWithValue("@LastAccessTime", fileIndex.LastAccessTime.ToString("o"));
-            command.Parameters.AddWithValue("@Attributes", (int)fileIndex.Attributes);
+                command.Parameters.AddWithValue("@Name", fileIndex.Name);
+                command.Parameters.AddWithValue("@FullPath", fileIndex.FullPath);
+                command.Parameters.AddWithValue("@Size", fileIndex.Length);
+                command.Parameters.AddWithValue("@CreationTime", fileIndex.CreationTime.ToString("o"));
+                command.Parameters.AddWithValue("@LastWriteTime", fileIndex.LastWriteTime.ToString("o"));
+                command.Parameters.AddWithValue("@LastAccessTime", fileIndex.LastAccessTime.ToString("o"));
+                command.Parameters.AddWithValue("@Attributes", (int)fileIndex.Attributes);
 
-            await command.ExecuteNonQueryAsync();
+                await command.ExecuteNonQueryAsync();
+            });
             return true;
         }
         catch (Exception ex)
@@ -55,8 +57,8 @@ internal class FileIndexContext
     {
         try
         {
-            using var connection = _dbContext.GetConnection();
-            using var command = connection.CreateCommand();
+            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var command = connection.CreateCommand();
             command.CommandText = @"
                     SELECT * FROM FileIndex 
                     WHERE Name LIKE @SearchTerm OR FullPath LIKE @SearchTerm";
@@ -81,7 +83,7 @@ internal class FileIndexContext
         catch (Exception ex)
         {
             Console.WriteLine($"Error searching files: {ex.Message}");
-            return new List<FileIndex>();
+            return [];
         }
     }
 
@@ -89,8 +91,8 @@ internal class FileIndexContext
     {
         try
         {
-            using var connection = _dbContext.GetConnection();
-            using var command = connection.CreateCommand();
+            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var command = connection.CreateCommand();
             command.CommandText = "SELECT * FROM FileIndex WHERE FullPath = @FullPath";
             command.Parameters.AddWithValue("@FullPath", fullPath);
 
@@ -120,11 +122,13 @@ internal class FileIndexContext
     {
         try
         {
-            using var connection = _dbContext.GetConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM FileIndex WHERE FullPath = @FullPath";
-            command.Parameters.AddWithValue("@FullPath", fullPath);
-            await command.ExecuteNonQueryAsync();
+            await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "DELETE FROM FileIndex WHERE FullPath = @FullPath";
+                command.Parameters.AddWithValue("@FullPath", fullPath);
+                await command.ExecuteNonQueryAsync();
+            });
         }
         catch (Exception ex)
         {
@@ -136,8 +140,8 @@ internal class FileIndexContext
     {
         try
         {
-            using var connection = _dbContext.GetConnection();
-            using var command = connection.CreateCommand();
+            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var command = connection.CreateCommand();
 
             bool isDrive = path.EndsWith(':') || path.EndsWith(":/") || path.EndsWith(@":\");
             string queryPath = isDrive ? $"{path}%" : $"{path.TrimEnd('/', '\\')}%";
@@ -162,10 +166,12 @@ internal class FileIndexContext
     {
         try
         {
-            using var connection = _dbContext.GetConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM FileIndex";
-            await command.ExecuteNonQueryAsync();
+            await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "DELETE FROM FileIndex";
+                await command.ExecuteNonQueryAsync();
+            });
         }
         catch (Exception ex)
         {

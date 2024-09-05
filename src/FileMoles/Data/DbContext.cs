@@ -1,14 +1,15 @@
 ﻿using Microsoft.Data.Sqlite;
+using System.Collections.Concurrent;
+using System.Data.Common;
 
 namespace FileMoles.Data;
 
-internal class DbContext : IDisposable
+internal class DbContext : IDisposable, IAsyncDisposable
 {
     private readonly SqliteConnection _connection;
     private bool _disposed = false;
-
-    public FileIndexContext FileIndexies { get; }
-    public TrackingFileContext TrackingFiles { get; }
+    private readonly SemaphoreSlim _transactionSemaphore = new(1, 1);
+    private readonly ConcurrentDictionary<int, DbTransaction> _transactions = new();
 
     public DbContext(string dbPath)
     {
@@ -18,10 +19,15 @@ internal class DbContext : IDisposable
         InitializeDatabase();
     }
 
-    internal SqliteConnection GetConnection()
+    public FileIndexContext FileIndexies { get; }
+    public TrackingFileContext TrackingFiles { get; }
+
+    private void EnsureConnectionOpen()
     {
-        EnsureConnectionOpen();
-        return _connection;
+        if (_connection.State != System.Data.ConnectionState.Open)
+        {
+            _connection.Open();
+        }
     }
 
     private void InitializeDatabase()
@@ -40,11 +46,90 @@ internal class DbContext : IDisposable
         }
     }
 
-    private void EnsureConnectionOpen()
+    internal async Task<SqliteConnection> GetOpenConnectionAsync()
     {
         if (_connection.State != System.Data.ConnectionState.Open)
         {
-            _connection.Open();
+            await _connection.OpenAsync();
+        }
+        return _connection;
+    }
+
+    internal async Task ExecuteInTransactionAsync(Func<SqliteConnection, Task> action)
+    {
+        await _transactionSemaphore.WaitAsync();
+        try
+        {
+            await using var connection = await GetOpenConnectionAsync();
+            var threadId = Environment.CurrentManagedThreadId;
+
+            if (!_transactions.TryGetValue(threadId, out DbTransaction transaction))
+            {
+                transaction = await connection.BeginTransactionAsync();
+                _transactions[threadId] = transaction;
+            }
+
+            try
+            {
+                await action(connection);
+
+                if (_transactions.TryRemove(threadId, out var removedTransaction))
+                {
+                    await removedTransaction.CommitAsync();
+                }
+            }
+            catch
+            {
+                if (_transactions.TryRemove(threadId, out var removedTransaction))
+                {
+                    await removedTransaction.RollbackAsync();
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            _transactionSemaphore.Release();
+        }
+    }
+
+    internal async Task<T> ExecuteInTransactionAsync<T>(Func<SqliteConnection, Task<T>> action)
+    {
+        await _transactionSemaphore.WaitAsync();
+        try
+        {
+            await using var connection = await GetOpenConnectionAsync();
+            var threadId = Environment.CurrentManagedThreadId;
+
+            if (!_transactions.TryGetValue(threadId, out DbTransaction transaction))
+            {
+                transaction = await connection.BeginTransactionAsync();
+                _transactions[threadId] = transaction;
+            }
+
+            try
+            {
+                var result = await action(connection);
+
+                if (_transactions.TryRemove(threadId, out var removedTransaction))
+                {
+                    await removedTransaction.CommitAsync();
+                }
+
+                return result;
+            }
+            catch
+            {
+                if (_transactions.TryRemove(threadId, out var removedTransaction))
+                {
+                    await removedTransaction.RollbackAsync();
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            _transactionSemaphore.Release();
         }
     }
 
@@ -72,7 +157,6 @@ internal class DbContext : IDisposable
     {
         await DisposeAsyncCore().ConfigureAwait(false);
         Dispose(false);
-        GC.SuppressFinalize(this);
     }
 
     protected virtual async ValueTask DisposeAsyncCore()

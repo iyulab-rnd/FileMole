@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using FileMoles.Utils;
 using FileMoles.Indexing;
 using FileMoles.Events;
 
@@ -41,6 +40,7 @@ internal class FMFileSystemWatcher : IDisposable
         {
             IncludeSubdirectories = true
         };
+
         watcher.Created += OnCreated;
         watcher.Changed += OnChanged;
         watcher.Deleted += OnDeleted;
@@ -51,9 +51,11 @@ internal class FMFileSystemWatcher : IDisposable
         return Task.CompletedTask;
     }
 
-    private void OnCreated(object sender, FileSystemEventArgs e)
+    private async void OnCreated(object sender, FileSystemEventArgs e)
     {
-        if (!_ignoreManager.ShouldIgnore(e.FullPath))
+        if (_ignoreManager.ShouldIgnore(e.FullPath)) return;
+
+        try
         {
             if (Directory.Exists(e.FullPath))
             {
@@ -61,73 +63,82 @@ internal class FMFileSystemWatcher : IDisposable
             }
             else
             {
-                ProcessCreatedEventAsync(e.FullPath).Forget();
+                await ProcessEventAsync(e.FullPath, WatcherChangeTypes.Created);
             }
         }
-    }
-
-    private async void OnChanged(object sender, FileSystemEventArgs e)
-    {
-        if (!_ignoreManager.ShouldIgnore(e.FullPath))
+        catch (Exception)
         {
-            var now = DateTime.UtcNow;
-            var lastEventTime = _lastEventTime.GetOrAdd(e.FullPath, now);
-
-            _lastEventTime[e.FullPath] = now;
-
-            if (Directory.Exists(e.FullPath))
-            {
-                DirectoryChanged?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Changed, e.FullPath));
-            }
-            else
-            {
-                await _processingTasks.AddOrUpdate(
-                    e.FullPath,
-                    _ => ProcessFileChangeAsync(e.FullPath, now),
-                    (_, existingTask) => existingTask.IsCompleted ? ProcessFileChangeAsync(e.FullPath, now) : existingTask
-                );
-            }
+            
         }
     }
 
-    private async Task ProcessFileChangeAsync(string fullPath, DateTime eventTime)
+    private void OnChanged(object sender, FileSystemEventArgs e)
+    {
+        if (_ignoreManager.ShouldIgnore(e.FullPath)) return;
+
+        var now = DateTime.UtcNow;
+        _lastEventTime[e.FullPath] = now;
+
+        if (_processingTasks.TryGetValue(e.FullPath, out var existingTask) && !existingTask.IsCompleted)
+        {
+            _processingTasks[e.FullPath] = existingTask.ContinueWith(_ => DebouncedProcessChangeAsync(e.FullPath, now));
+            return;
+        }
+
+        _processingTasks[e.FullPath] = DebouncedProcessChangeAsync(e.FullPath, now);
+    }
+
+    private async Task DebouncedProcessChangeAsync(string fullPath, DateTime eventTime)
     {
         await Task.Delay(_debouncePeriod);
 
-        if (_lastEventTime.TryGetValue(fullPath, out var lastTime) && lastTime > eventTime)
-        {
-            // 더 최근의 이벤트가 발생했지만, 여전히 변경 사항을 처리합니다.
-            eventTime = lastTime;
-        }
+        if (_lastEventTime.TryGetValue(fullPath, out var lastTime) && lastTime != eventTime) return;
 
-        var fileInfo = new FileInfo(fullPath);
-        if (fileInfo.Exists && await _fileIndexer.HasFileChangedAsync(fileInfo))
+        try
         {
-            await _fileIndexer.IndexFileAsync(fileInfo);
-            FileChanged?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Changed, fullPath));
+            if (Directory.Exists(fullPath))
+            {
+                DirectoryChanged?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Changed, fullPath));
+            }
+            else
+            {
+                await ProcessEventAsync(fullPath, WatcherChangeTypes.Changed);
+            }
+        }
+        catch (Exception)
+        {
+            
         }
 
         _processingTasks.TryRemove(fullPath, out _);
     }
 
-    private void OnDeleted(object sender, FileSystemEventArgs e)
+    private async void OnDeleted(object sender, FileSystemEventArgs e)
     {
-        if (!_ignoreManager.ShouldIgnore(e.FullPath))
+        if (_ignoreManager.ShouldIgnore(e.FullPath)) return;
+
+        try
         {
-            if (e.FullPath.EndsWith(Path.DirectorySeparatorChar.ToString()))
+            if (Directory.Exists(e.FullPath))
             {
                 DirectoryDeleted?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Deleted, e.FullPath));
             }
             else
             {
-                ProcessDeletedEventAsync(e.FullPath).Forget();
+                await ProcessEventAsync(e.FullPath, WatcherChangeTypes.Deleted);
             }
+        }
+        catch (Exception)
+        {
+            // Handle or log the exception
         }
     }
 
-    private void OnRenamed(object sender, RenamedEventArgs e)
+    private async void OnRenamed(object sender, RenamedEventArgs e)
     {
-        if (!_ignoreManager.ShouldIgnore(e.FullPath) && !_ignoreManager.ShouldIgnore(e.OldFullPath))
+        if (_ignoreManager.ShouldIgnore(e.FullPath) || _ignoreManager.ShouldIgnore(e.OldFullPath)) return;
+
+        try
         {
             if (Directory.Exists(e.FullPath))
             {
@@ -135,48 +146,59 @@ internal class FMFileSystemWatcher : IDisposable
             }
             else
             {
-                ProcessRenamedEventAsync(e.OldFullPath, e.FullPath).Forget();
+                await ProcessEventAsync(e.FullPath, WatcherChangeTypes.Renamed, e.OldFullPath);
             }
         }
-    }
-
-    private async Task ProcessCreatedEventAsync(string fullPath)
-    {
-        var fileInfo = new FileInfo(fullPath);
-        if (fileInfo.Exists)
+        catch (Exception)
         {
-            await _fileIndexer.IndexFileAsync(fileInfo);
-            FileCreated?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Created, fullPath));
+            // Handle or log the exception
         }
     }
 
-    private async Task ProcessChangedEventAsync(string fullPath)
+    private async Task ProcessEventAsync(string fullPath, WatcherChangeTypes changeType, string? oldPath = null)
     {
-        var fileInfo = new FileInfo(fullPath);
-        if (!fileInfo.Exists)
+        try
         {
-            return; // 파일이 삭제되었거나 접근할 수 없는 경우
+            if (changeType == WatcherChangeTypes.Deleted)
+            {
+                await _fileIndexer.RemoveFileAsync(fullPath);
+                FileDeleted?.Invoke(this, new FileSystemEvent(changeType, fullPath));
+                return;
+            }
+
+            if (changeType == WatcherChangeTypes.Renamed && oldPath != null)
+            {
+                await _fileIndexer.RemoveFileAsync(oldPath);
+                var info = new FileInfo(fullPath);
+                if (info.Exists)
+                {
+                    await _fileIndexer.IndexFileAsync(info);
+                    FileRenamed?.Invoke(this, new FileSystemEvent(changeType, fullPath, oldPath));
+                }
+                return;
+            }
+
+            var fileInfo = new FileInfo(fullPath);
+            if (fileInfo.Exists)
+            {
+                if (changeType == WatcherChangeTypes.Created || await _fileIndexer.HasFileChangedAsync(fileInfo))
+                {
+                    await _fileIndexer.IndexFileAsync(fileInfo);
+                    if (changeType == WatcherChangeTypes.Created)
+                    {
+                        FileCreated?.Invoke(this, new FileSystemEvent(changeType, fullPath));
+                    }
+                    else
+                    {
+                        FileChanged?.Invoke(this, new FileSystemEvent(changeType, fullPath));
+                    }
+                }
+            }
         }
-
-        await _fileIndexer.IndexFileAsync(fileInfo);
-        FileChanged?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Changed, fullPath));
-    }
-
-    private async Task ProcessDeletedEventAsync(string fullPath)
-    {
-        await _fileIndexer.RemoveFileAsync(fullPath);
-        FileDeleted?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Deleted, fullPath));
-    }
-
-    private async Task ProcessRenamedEventAsync(string oldPath, string newPath)
-    {
-        await _fileIndexer.RemoveFileAsync(oldPath);
-        var fileInfo = new FileInfo(newPath);
-        if (fileInfo.Exists)
+        catch (Exception)
         {
-            await _fileIndexer.IndexFileAsync(fileInfo);
+            // Handle or log the exception
         }
-        FileRenamed?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Renamed, newPath, oldPath));
     }
 
     public Task UnwatchDirectoryAsync(string path)

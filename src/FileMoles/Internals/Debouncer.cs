@@ -13,7 +13,7 @@ internal class Debouncer<T> : IDisposable
         _timer = new System.Timers.Timer(interval);
         _timer.Elapsed += OnTimerElapsed;
         _timer.AutoReset = false;
-        _debouncedItems = new Dictionary<string, T>();
+        _debouncedItems = [];
         _asyncAction = asyncAction;
     }
 

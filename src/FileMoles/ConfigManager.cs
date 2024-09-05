@@ -5,8 +5,8 @@ namespace FileMoles;
 public class ConfigManager
 {
     private readonly string _configPath;
-    private readonly List<string> _ignorePatterns = new List<string>();
-    private readonly List<string> _includePatterns = new List<string>();
+    private readonly List<string> _ignorePatterns = [];
+    private readonly List<string> _includePatterns = [];
     private readonly string _ignoreConfigPath;
     private readonly string _includeConfigPath;
 
@@ -69,8 +69,8 @@ public class ConfigManager
         }
     }
 
-    public List<string> GetIgnorePatterns() => new List<string>(_ignorePatterns);
-    public List<string> GetIncludePatterns() => new List<string>(_includePatterns);
+    public List<string> GetIgnorePatterns() => new(_ignorePatterns);
+    public List<string> GetIncludePatterns() => new(_includePatterns);
 
     public void ClearIgnorePatterns()
     {
