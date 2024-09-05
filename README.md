@@ -1,36 +1,71 @@
 # FileMole
 
-FileMole은 파일 시스템을 손쉽게 모니터링하고 관리할 수 있는 .NET 라이브러리입니다. (.NET 8)
-
-## FileMole의 의미와 배경
-
-FileMole이라는 이름은 "File"과 "Mole(두더지)"의 합성어입니다. 이 이름에는 다음과 같은 의미가 담겨 있습니다:
-
-1. 파일 변경 감지: 두더지가 땅 위로 고개를 내미는 것처럼, FileMole은 파일 시스템의 변화를 감지하고 이를 사용자에게 알립니다.
-2. 은밀한 작업: 두더지가 땅 속에서 보이지 않게 작업하듯이, FileMole은 백그라운드에서 조용히 파일 시스템을 모니터링합니다.
-3. 연결과 동기화: 두더지가 터널을 파서 여러 지점을 연결하듯이, FileMole은 다양한 저장소(로컬, 원격, 클라우드) 간의 파일 동기화를 가능하게 합니다.
-4. 적응성: 두더지가 다양한 환경에 적응하듯이, FileMole은 여러 종류의 파일 시스템과 저장소에 적응하여 작동합니다.
+FileMole는 파일 시스템 변경을 감시하고 추적하는 강력한 .NET 라이브러리입니다. 두 가지 주요 기능을 제공합니다: 파일 시스템 감시와 파일 내용 추적.
 
 ## 주요 기능
 
-- 로컬 파일시스템, 원격 스토리지, 클라우드 파일 서비스에 대한 디렉토리 목록, 파일 목록 제공
-- 파일 이름과 경로 색인을 통한 빠른 탐색 기능
-- 파일, 폴더에 관한 작업 (생성, 이름 변경, 수정, 삭제 등) 이벤트 제공
-- 파일 특성, 캐시, 컨텐츠 해시 등을 활용하여 실제 파일의 내용이 변경되었을 때만 발생하는 FileContentChanged 이벤트 제공
+### 1. 파일 시스템 감시 (File System Monitoring)
 
-## MoleTrack
+- **목적**: 지정된 디렉토리의 파일 및 폴더 변경사항을 감지하고 인덱싱하여 빠른 검색을 제공합니다.
+- **주요 기능**:
+  - 파일 및 폴더 생성, 수정, 삭제, 이름 변경 감지
+  - 파일 메타데이터 인덱싱
+  - 빠른 파일 검색
 
-MoleTrack은 FileMole의 핵심 기능으로, 파일 변경시 자동화된 버전을 관리하고 변경 사항을 추적합니다.
+#### 사용 방법
 
-주요 특징:
-- `.mole` 폴더를 사용한 버전 관리
-- 단일 파일 또는 폴더 규칙 기반의 자동 추적
-- 변경 감지 시 자동 버전 생성 및 diff 정보 제공
-- MoleTrackChanged 이벤트를 통한 변경 알림
-- Text, ODF, PDF 파일의 텍스트 기반 변경 내용 DIFF 제공 (아직 구현 안됨)
-- 자동화된 파일 버전 관리 (아직 구현 안됨)
+```csharp
+var builder = new FileMoleBuilder();
+builder.AddMole("C:\\MyFolder", MoleType.Local);
+var fileMole = builder.Build();
 
-작동 방식:
-1. 파일이나 폴더에 `.mole` 폴더가 생성되면 자동으로 해당 항목의 버전 관리 시작
-2. 파일 변경 감지 시 새 버전 자동 생성
-3. 변경 사항에 대한 diff 정보 생성 및 MoleTrackChanged 이벤트 발생
+// 이벤트 구독
+fileMole.FileCreated += (sender, e) => Console.WriteLine($"File created: {e.FullPath}");
+fileMole.FileChanged += (sender, e) => Console.WriteLine($"File changed: {e.FullPath}");
+
+// 파일 검색
+var searchResults = await fileMole.SearchFilesAsync("example.txt");
+```
+
+### 2. 파일 내용 추적 (File Content Tracking)
+
+- **목적**: 특정 파일의 내용 변경을 세밀하게 추적하고, 변경 내역을 제공합니다.
+- **주요 기능**:
+  - 파일 내용의 변경 사항 추적
+  - 변경 내용에 대한 상세한 diff 정보 제공
+  - 파일별 추적 설정 가능 (ignore 및 include 패턴 지원)
+
+#### 사용 방법
+
+```csharp
+// 특정 파일이나 디렉토리에 대한 추적 활성화
+await fileMole.EnableMoleTrackAsync("C:\\MyFolder\\important.txt");
+
+// 추적 이벤트 구독
+fileMole.FileContentChanged += (sender, e) => 
+{
+    Console.WriteLine($"Content changed in file: {e.FullPath}");
+    Console.WriteLine($"Changes: {e.Diff}");
+};
+
+// 추적 설정
+fileMole.AddIgnorePattern("C:\\MyFolder", "*.tmp");
+fileMole.AddIncludePattern("C:\\MyFolder", "*.cs");
+```
+
+## 설치
+
+NuGet 패키지 관리자를 통해 FileMole을 설치할 수 있습니다:
+
+```
+dotnet add package FileMole
+```
+
+## 주의사항
+
+- 파일 시스템 감시는 대량의 파일을 다룰 때 시스템 리소스를 많이 사용할 수 있습니다. 필요한 디렉토리만 감시하도록 설정하세요.
+- 파일 내용 추적은 추적 대상 파일의 백업 복사본을 생성합니다. 충분한 디스크 공간이 있는지 확인하세요.
+
+## 라이선스
+
+이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.

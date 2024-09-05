@@ -7,10 +7,9 @@ internal class IgnoreManager
     private readonly HashSet<string> _ignoredPaths = [];
     private readonly List<Regex> _ignoredPatterns = [];
 
-    public IgnoreManager()
+    public IgnoreManager(string ignoreConfigPath)
     {
-        var basePath = Functions.GetFileMoleDataPath();
-        LoadIgnoreFile(Path.Combine(basePath, "filemole.ignore"));
+        LoadIgnoreFile(ignoreConfigPath);
         AddDefaultIgnores();
     }
 
@@ -20,7 +19,7 @@ internal class IgnoreManager
         {
             foreach (var line in File.ReadAllLines(path))
             {
-                if (!string.IsNullOrWhiteSpace(line) && !line.StartsWith("#"))
+                if (!string.IsNullOrWhiteSpace(line) && !line.StartsWith('#'))
                 {
                     AddIgnorePattern(line.Trim());
                 }
@@ -31,7 +30,7 @@ internal class IgnoreManager
     private void AddDefaultIgnores()
     {
         // FileMole specific files
-        AddIgnorePattern(Functions.GetDatabasePath());
+        AddIgnorePattern("filemole*");
         AddIgnorePattern("*.db-journal");
 
         // Version control

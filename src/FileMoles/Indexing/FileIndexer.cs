@@ -7,12 +7,17 @@ namespace FileMoles.Indexing;
 public class FileIndexer : IDisposable, IAsyncDisposable
 {
     private readonly string _dbPath;
-    private SqliteConnection _connection;
+    private SqliteConnection _connection = null!;
     private bool _disposed = false;
 
-    public FileIndexer(string databasePath)
+    public FileIndexer(string dbPath)
     {
-        _dbPath = databasePath;
+        if (Directory.Exists(Path.GetDirectoryName(dbPath)) is false)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+        }
+
+        _dbPath = dbPath;
         _connection = new SqliteConnection($"Data Source={_dbPath};Mode=ReadWriteCreate;");
         InitializeDatabase();
     }
@@ -150,12 +155,17 @@ public class FileIndexer : IDisposable, IAsyncDisposable
         catch (Exception ex)
         {
             Console.WriteLine($"Error searching files: {ex.Message}");
-            return Enumerable.Empty<FileInfo>();
+            return [];
         }
     }
 
     public async Task<bool> HasFileChangedAsync(FileInfo file)
     {
+        if (file.Exists == false)
+        {
+            return true;
+        }
+
         var indexedFile = await GetIndexedFileInfoAsync(file.FullName);
         if (indexedFile == null)
         {
@@ -180,7 +190,7 @@ public class FileIndexer : IDisposable, IAsyncDisposable
 
             using var reader = await command.ExecuteReaderAsync();
             if (await reader.ReadAsync())
-            {   
+            {
                 var file = new FileInfo(reader.GetString(reader.GetOrdinal("FullPath")));
                 if (!file.Exists)
                 {

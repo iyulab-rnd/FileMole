@@ -22,9 +22,9 @@ internal class FMFileSystemWatcher : IDisposable
     internal event EventHandler<FileSystemEvent>? DirectoryDeleted;
     internal event EventHandler<FileSystemEvent>? DirectoryRenamed;
 
-    public FMFileSystemWatcher(FileIndexer fileIndexer)
+    public FMFileSystemWatcher(FileMoleOptions options, FileIndexer fileIndexer)
     {
-        _ignoreManager = new IgnoreManager();
+        _ignoreManager = new IgnoreManager(Path.Combine(options.GetDataPath(), Constants.FileMoleIgnoreFile));
         _fileIndexer = fileIndexer;
     }
 

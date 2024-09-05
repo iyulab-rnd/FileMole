@@ -4,7 +4,7 @@ namespace FileMoles.Tests.Indexing;
 
 public class FileIndexerTests : IAsyncLifetime
 {
-    private FileIndexer _indexer;
+    private FileIndexer _indexer = null!;
     private readonly string _testDirectory;
     private readonly string _dbPath;
 

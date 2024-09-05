@@ -28,7 +28,7 @@ namespace FileMoles.Tests
                 .SetOptions(options)
                 .AddMole(_tempPath)
                 .Build();
-            _fileMole.EnableMoleTrack(_tempPath);
+            _fileMole.EnableMoleTrackAsync(_tempPath);
         }
 
         private async Task<string> CreateUniqueFileAsync(string content = "Test content")
