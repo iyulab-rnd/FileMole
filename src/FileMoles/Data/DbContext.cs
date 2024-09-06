@@ -1,4 +1,5 @@
 ﻿using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Data.Common;
 
@@ -39,8 +40,8 @@ internal class DbContext : IDisposable, IAsyncDisposable
             command.ExecuteNonQuery();
         }
         catch (Exception ex)
-        {
-            Console.WriteLine($"Error initializing database: {ex.Message}");
+        {   
+            Logger.WriteLine($"Error initializing database: {ex.Message}");
             throw;
         }
     }

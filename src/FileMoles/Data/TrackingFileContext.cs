@@ -42,7 +42,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error adding tracking file: {ex.Message}");
+            Logger.WriteLine($"Error adding tracking file: {ex.Message}");
             return false;
         }
     }
@@ -69,7 +69,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error removing tracking file: {ex.Message}");
+            Logger.WriteLine($"Error removing tracking file: {ex.Message}");
             return false;
         }
     }
@@ -104,7 +104,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting all tracking files: {ex.Message}");
+            Logger.WriteLine($"Error getting all tracking files: {ex.Message}");
             return [];
         }
     }
@@ -131,7 +131,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting tracking file: {ex.Message}");
+            Logger.WriteLine($"Error getting tracking file: {ex.Message}");
             return null;
         }
     }
@@ -158,7 +158,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting tracking file by backup file name: {ex.Message}");
+            Logger.WriteLine($"Error getting tracking file by backup file name: {ex.Message}");
             return null;
         }
     }
@@ -178,7 +178,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error updating last tracked time: {ex.Message}");
+            Logger.WriteLine($"Error updating last tracked time: {ex.Message}");
             return false;
         }
     }
@@ -212,7 +212,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error checking if directory is tracked: {ex.Message}");
+            Logger.WriteLine($"Error checking if directory is tracked: {ex.Message}");
             return false;
         }
     }
@@ -230,7 +230,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error checking if file is tracked: {ex.Message}");
+            Logger.WriteLine($"Error checking if file is tracked: {ex.Message}");
             return false;
         }
     }
@@ -253,7 +253,7 @@ internal class TrackingFileContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting tracked files in directory: {ex.Message}");
+            Logger.WriteLine($"Error getting tracked files in directory: {ex.Message}");
             return [];
         }
     }

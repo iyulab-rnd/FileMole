@@ -34,7 +34,7 @@ public class FileIndexer : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error indexing file: {ex.Message}");
+            Logger.WriteLine($"Error indexing file: {ex.Message}");
             return false;
         }
     }

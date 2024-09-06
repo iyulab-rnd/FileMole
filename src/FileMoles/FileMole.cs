@@ -286,7 +286,7 @@ public class FileMole : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error scanning directory {path}: {ex.Message}");
+            Logger.WriteLine($"Error scanning directory {path}: {ex.Message}");
         }
     }
 

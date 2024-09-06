@@ -46,7 +46,7 @@ internal class FileIndexContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error adding or updating file index: {ex.Message}");
+            Logger.WriteLine($"Error adding or updating file index: {ex.Message}");
             return false;
         }
     }
@@ -79,7 +79,7 @@ internal class FileIndexContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error searching files: {ex.Message}");
+            Logger.WriteLine($"Error searching files: {ex.Message}");
             return [];
         }
     }
@@ -109,7 +109,7 @@ internal class FileIndexContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting file index: {ex.Message}");
+            Logger.WriteLine($"Error getting file index: {ex.Message}");
             return null;
         }
     }
@@ -128,7 +128,7 @@ internal class FileIndexContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error removing file from index: {ex.Message}");
+            Logger.WriteLine($"Error removing file from index: {ex.Message}");
         }
     }
 
@@ -153,7 +153,7 @@ internal class FileIndexContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting file count: {ex.Message}");
+            Logger.WriteLine($"Error getting file count: {ex.Message}");
             return 0;
         }
     }
@@ -171,7 +171,7 @@ internal class FileIndexContext
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error clearing database: {ex.Message}");
+            Logger.WriteLine($"Error clearing database: {ex.Message}");
         }
     }
 }

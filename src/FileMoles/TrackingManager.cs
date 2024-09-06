@@ -118,11 +118,11 @@ public class TrackingManager : IDisposable
                 try
                 {
                     await FileSafe.DeleteRetryAsync(backupFile, cancellationToken: cancellationToken);
-                    Console.WriteLine($"Removed unused backup file: {backupFile}");
+                    Logger.WriteLine($"Removed unused backup file: {backupFile}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error removing unused backup file {backupFile}: {ex.Message}");
+                    Logger.WriteLine($"Error removing unused backup file {backupFile}: {ex.Message}");
                 }
             }
         }
@@ -220,7 +220,7 @@ public class TrackingManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error tracking file: {filePath}. Error: {ex.Message}");
+            Logger.WriteLine($"Error tracking file: {filePath}. Error: {ex.Message}");
             throw new InvalidOperationException($"Failed to track and compare file: {filePath}", ex);
         }
     }
@@ -428,7 +428,7 @@ public class TrackingManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error processing file event for {e.FullPath}: {ex.Message}");
+            Logger.WriteLine($"Error processing file event for {e.FullPath}: {ex.Message}");
         }
     }
 
@@ -486,7 +486,7 @@ public class TrackingManager : IDisposable
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error removing tracked file and backup: {filePath}. Error: {ex.Message}");
+                Logger.WriteLine($"Error removing tracked file and backup: {filePath}. Error: {ex.Message}");
                 return false;
             }
         }
@@ -523,7 +523,7 @@ public class TrackingManager : IDisposable
             }
             else
             {
-                Console.WriteLine($"Warning: Path does not exist: {path}");
+                Logger.WriteLine($"Warning: Path does not exist: {path}");
             }
         });
         return trackedFiles;

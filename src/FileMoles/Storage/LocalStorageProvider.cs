@@ -23,15 +23,15 @@ public class LocalStorageProvider : IStorageProvider
             }
             catch (UnauthorizedAccessException ex)
             {
-                Console.WriteLine($"Access denied to directory: {path}. Error: {ex.Message}");
+                Logger.WriteLine($"Access denied to directory: {path}. Error: {ex.Message}");
             }
             catch (SecurityException ex)
             {
-                Console.WriteLine($"Security error accessing directory {path}. Error: {ex.Message}");
+                Logger.WriteLine($"Security error accessing directory {path}. Error: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error accessing directory {path}. Error: {ex.Message}");
+                Logger.WriteLine($"Error accessing directory {path}. Error: {ex.Message}");
             }
 
             return files;
@@ -51,15 +51,15 @@ public class LocalStorageProvider : IStorageProvider
             }
             catch (UnauthorizedAccessException ex)
             {
-                Console.WriteLine($"Access denied to directory: {path}. Error: {ex.Message}");
+                Logger.WriteLine($"Access denied to directory: {path}. Error: {ex.Message}");
             }
             catch (SecurityException ex)
             {
-                Console.WriteLine($"Security error accessing directory {path}. Error: {ex.Message}");
+                Logger.WriteLine($"Security error accessing directory {path}. Error: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error accessing directory {path}. Error: {ex.Message}");
+                Logger.WriteLine($"Error accessing directory {path}. Error: {ex.Message}");
             }
 
             return directories;
