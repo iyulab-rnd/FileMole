@@ -305,6 +305,7 @@ public class TrackingManager : IDisposable
 
         var isDirectory = Directory.Exists(path);
         var trackingFile = new TrackingFile(path, isDirectory);
+        _trackingStore.AddOrUpdateTrackingFile(trackingFile);
 
         await Task.Run(async () =>
         {
@@ -319,7 +320,6 @@ public class TrackingManager : IDisposable
             }
         });
 
-        _trackingStore.AddOrUpdateTrackingFile(trackingFile);
         return true;
     }
 
