@@ -38,7 +38,6 @@ public class FileMoleBuilder
     public FileMole Build()
     {
         var fileMole = new FileMole(_options);
-        fileMole.StartInitialScan();
         return fileMole;
     }
 }

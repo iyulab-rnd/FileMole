@@ -22,11 +22,11 @@ internal class FileIndexContext
         _dbContext = dbContext;
     }
 
-    public async Task<bool> AddOrUpdateAsync(FileIndex fileIndex)
+    public async Task<bool> AddOrUpdateAsync(FileIndex fileIndex, CancellationToken cancellationToken)
     {
         try
         {
-            await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            await _dbContext.ExecuteInTransactionAsync(async (connection, ct) =>
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = @"
@@ -42,8 +42,8 @@ internal class FileIndexContext
                 command.Parameters.AddWithValue("@LastAccessTime", fileIndex.LastAccessTime.ToString("o"));
                 command.Parameters.AddWithValue("@Attributes", (int)fileIndex.Attributes);
 
-                await command.ExecuteNonQueryAsync();
-            });
+                await command.ExecuteNonQueryAsync(ct);
+            }, cancellationToken);
             return true;
         }
         catch (Exception ex)
@@ -53,11 +53,11 @@ internal class FileIndexContext
         }
     }
 
-    public async Task<IEnumerable<FileIndex>> SearchAsync(string searchTerm)
+    public async Task<IEnumerable<FileIndex>> SearchAsync(string searchTerm, CancellationToken cancellationToken)
     {
         try
         {
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             await using var command = connection.CreateCommand();
             command.CommandText = @"
                     SELECT * FROM FileIndex 
@@ -65,8 +65,8 @@ internal class FileIndexContext
             command.Parameters.AddWithValue("@SearchTerm", $"%{searchTerm}%");
 
             var results = new List<FileIndex>();
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
             {
                 results.Add(new FileIndex(reader.GetString(reader.GetOrdinal("FullPath")))
                 {
@@ -87,17 +87,17 @@ internal class FileIndexContext
         }
     }
 
-    public async Task<FileIndex?> GetAsync(string fullPath)
+    public async Task<FileIndex?> GetAsync(string fullPath, CancellationToken cancellationToken)
     {
         try
         {
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT * FROM FileIndex WHERE FullPath = @FullPath";
             command.Parameters.AddWithValue("@FullPath", fullPath);
 
-            using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
             {
                 return new FileIndex(reader.GetString(reader.GetOrdinal("FullPath")))
                 {
@@ -118,17 +118,17 @@ internal class FileIndexContext
         }
     }
 
-    public async Task RemoveAsync(string fullPath)
+    public async Task RemoveAsync(string fullPath, CancellationToken cancellationToken)
     {
         try
         {
-            await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            await _dbContext.ExecuteInTransactionAsync(async (connection, ct) =>
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = "DELETE FROM FileIndex WHERE FullPath = @FullPath";
                 command.Parameters.AddWithValue("@FullPath", fullPath);
-                await command.ExecuteNonQueryAsync();
-            });
+                await command.ExecuteNonQueryAsync(ct);
+            }, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -136,11 +136,11 @@ internal class FileIndexContext
         }
     }
 
-    public async Task<int> GetCountAsync(string path)
+    public async Task<int> GetCountAsync(string path, CancellationToken cancellationToken)
     {
         try
         {
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             await using var command = connection.CreateCommand();
 
             bool isDrive = path.EndsWith(':') || path.EndsWith(":/") || path.EndsWith(@":\");
@@ -152,7 +152,7 @@ internal class FileIndexContext
                 WHERE FullPath LIKE @Path";
             command.Parameters.AddWithValue("@Path", queryPath);
 
-            var result = await command.ExecuteScalarAsync();
+            var result = await command.ExecuteScalarAsync(cancellationToken);
             return Convert.ToInt32(result);
         }
         catch (Exception ex)
@@ -162,16 +162,16 @@ internal class FileIndexContext
         }
     }
 
-    public async Task ClearAsync()
+    public async Task ClearAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            await _dbContext.ExecuteInTransactionAsync(async (connection, ct) =>
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = "DELETE FROM FileIndex";
-                await command.ExecuteNonQueryAsync();
-            });
+                await command.ExecuteNonQueryAsync(ct);
+            }, cancellationToken);
         }
         catch (Exception ex)
         {

@@ -10,15 +10,10 @@ public class FileIndexer : IDisposable, IAsyncDisposable
 
     public FileIndexer(string dbPath)
     {
-        if (Directory.Exists(Path.GetDirectoryName(dbPath)) is false)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
-        }
-
-        _dbContext = new DbContext(dbPath);
+        _dbContext = Resolver.ResolveDbContext(dbPath);
     }
 
-    public async Task<bool> IndexFileAsync(FileInfo file)
+    public async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
         if (FileMoleUtils.IsHidden(file.FullName))
         {
@@ -36,7 +31,7 @@ public class FileIndexer : IDisposable, IAsyncDisposable
                 Attributes = file.Attributes
             };
 
-            return await _dbContext.FileIndexies.AddOrUpdateAsync(fileIndex);
+            return await _dbContext.FileIndexies.AddOrUpdateAsync(fileIndex, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -45,9 +40,9 @@ public class FileIndexer : IDisposable, IAsyncDisposable
         }
     }
 
-    public async Task<IEnumerable<FileInfo>> SearchAsync(string searchTerm)
+    public async Task<IEnumerable<FileInfo>> SearchAsync(string searchTerm, CancellationToken cancellationToken = default)
     {
-        var fileIndexes = await _dbContext.FileIndexies.SearchAsync(searchTerm);
+        var fileIndexes = await _dbContext.FileIndexies.SearchAsync(searchTerm, cancellationToken);
         var results = new List<FileInfo>();
 
         foreach (var fileIndex in fileIndexes)
@@ -63,28 +58,28 @@ public class FileIndexer : IDisposable, IAsyncDisposable
                     file.Attributes != fileIndex.Attributes ||
                     file.Length != fileIndex.Length)
                 {
-                    await IndexFileAsync(file);
+                    await IndexFileAsync(file, cancellationToken);
                 }
 
                 results.Add(file);
             }
             else
             {
-                await _dbContext.FileIndexies.RemoveAsync(fileIndex.FullPath);
+                await _dbContext.FileIndexies.RemoveAsync(fileIndex.FullPath, cancellationToken);
             }
         }
 
         return results;
     }
 
-    public async Task<bool> HasFileChangedAsync(FileInfo file)
+    public async Task<bool> HasFileChangedAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
         if (file.Exists == false)
         {
             return true;
         }
 
-        var indexedFile = await _dbContext.FileIndexies.GetAsync(file.FullName);
+        var indexedFile = await _dbContext.FileIndexies.GetAsync(file.FullName, cancellationToken);
         if (indexedFile == null)
         {
             return true;
@@ -97,24 +92,24 @@ public class FileIndexer : IDisposable, IAsyncDisposable
             indexedFile.Attributes != file.Attributes;
     }
 
-    public Task<FileIndex?> GetIndexedFileInfoAsync(string fullPath)
+    public Task<FileIndex?> GetIndexedFileInfoAsync(string fullPath, CancellationToken cancellationToken = default)
     {
-        return _dbContext.FileIndexies.GetAsync(fullPath);
+        return _dbContext.FileIndexies.GetAsync(fullPath, cancellationToken);
     }
 
-    public Task RemoveFileAsync(string fullPath)
+    public Task RemoveFileAsync(string fullPath, CancellationToken cancellationToken = default)
     {
-        return _dbContext.FileIndexies.RemoveAsync(fullPath);
+        return _dbContext.FileIndexies.RemoveAsync(fullPath, cancellationToken);
     }
 
-    public Task<int> GetFileCountAsync(string path)
+    public Task<int> GetFileCountAsync(string path, CancellationToken cancellationToken = default)
     {
-        return _dbContext.FileIndexies.GetCountAsync(path);
+        return _dbContext.FileIndexies.GetCountAsync(path, cancellationToken);
     }
 
-    public Task ClearDatabaseAsync()
+    public Task ClearDatabaseAsync(CancellationToken cancellationToken = default)
     {
-        return _dbContext.FileIndexies.ClearAsync();
+        return _dbContext.FileIndexies.ClearAsync(cancellationToken);
     }
 
     public void Dispose()
@@ -138,7 +133,7 @@ public class FileIndexer : IDisposable, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await DisposeAsyncCore().ConfigureAwait(false);
+        await DisposeAsyncCore();
         Dispose(false);
         GC.SuppressFinalize(this);
     }
@@ -147,7 +142,7 @@ public class FileIndexer : IDisposable, IAsyncDisposable
     {
         if (_dbContext != null)
         {
-            await _dbContext.DisposeAsync().ConfigureAwait(false);
+            await _dbContext.DisposeAsync();
         }
     }
 }

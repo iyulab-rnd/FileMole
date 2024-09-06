@@ -2,7 +2,7 @@
 
 namespace FileMoles.Storage;
 
-public interface IStorageProvider
+public interface IStorageProvider : IDisposable
 {
     Task<FileInfo> GetFileAsync(string filePath);
     Task<IEnumerable<FileInfo>> GetFilesAsync(string path);

@@ -4,16 +4,22 @@ using FileMoles.Utils;
 
 namespace FileMoles.Internals;
 
-internal class InMemoryTrackingStore(DbContext dbContext)
+internal class InMemoryTrackingStore
 {
     private readonly ConcurrentDictionary<string, TrackingFile> _trackingFiles = new();
-    private readonly DbContext _dbContext = dbContext;
+    private readonly DbContext _dbContext;
 
-    public async Task InitializeAsync()
+    public InMemoryTrackingStore(DbContext dbContext)
     {
-        var allTrackingFiles = await _dbContext.TrackingFiles.GetAllTrackingFilesAsync();
+        _dbContext = dbContext;
+    }
+
+    public async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        var allTrackingFiles = await _dbContext.TrackingFiles.GetAllTrackingFilesAsync(cancellationToken);
         foreach (var file in allTrackingFiles)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             _trackingFiles[file.FullPath] = file;
         }
     }
@@ -26,14 +32,14 @@ internal class InMemoryTrackingStore(DbContext dbContext)
     public void AddOrUpdateTrackingFile(TrackingFile trackingFile)
     {
         _trackingFiles[trackingFile.FullPath] = trackingFile;
-        Task.Run(() => _dbContext.TrackingFiles.AddTrackingFileAsync(trackingFile)).Forget();
+        Task.Run(() => _dbContext.TrackingFiles.AddTrackingFileAsync(trackingFile, CancellationToken.None)).Forget();
     }
 
     public bool RemoveTrackingFile(string fullPath)
     {
         if (_trackingFiles.TryRemove(fullPath, out _))
         {
-            Task.Run(() => _dbContext.TrackingFiles.RemoveTrackingFileAsync(fullPath)).Forget();
+            Task.Run(() => _dbContext.TrackingFiles.RemoveTrackingFileAsync(fullPath, CancellationToken.None)).Forget();
             return true;
         }
         return false;

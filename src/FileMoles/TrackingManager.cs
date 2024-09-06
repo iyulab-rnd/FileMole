@@ -14,29 +14,31 @@ public class TrackingManager : IDisposable
     private readonly ConfigManager _configManager;
     private readonly Debouncer<FileSystemEvent> _fileEventDebouncer;
     private readonly EventHandler<FileContentChangedEventArgs> _fileContentChangedHandler;
-    private readonly DbContext _dbContext;
     private readonly HashGenerator _hashGenerator;
     private readonly InMemoryTrackingStore _trackingStore;
     private bool _disposed = false;
 
-    public TrackingManager(string basePath, double debounceTime, EventHandler<FileContentChangedEventArgs> fileContentChangedHandler)
+    public TrackingManager(
+        string basePath,
+        double debounceTime,
+        ConfigManager configManager,
+        EventHandler<FileContentChangedEventArgs> fileContentChangedHandler)
     {
         _basePath = basePath;
-        _configManager = new ConfigManager(Path.Combine(basePath, "config"));
+        _configManager = configManager;
         _fileEventDebouncer = new Debouncer<FileSystemEvent>(Convert.ToInt32(debounceTime), OnDebouncedFileEvents);
         _fileContentChangedHandler = fileContentChangedHandler;
-        _dbContext = new DbContext(Path.Combine(basePath, "filemoles.db"));
         _hashGenerator = new HashGenerator();
-        _trackingStore = new InMemoryTrackingStore(_dbContext);
-        Directory.CreateDirectory(Path.Combine(_basePath, "backups"));
+        _trackingStore = new InMemoryTrackingStore(Resolver.ResolveDbContext(Path.Combine(basePath, Constants.DbFileName)));
+        Directory.CreateDirectory(Path.Combine(_basePath, Constants.BackupDirName));
     }
 
-    public async Task InitializeAsync()
+    internal async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        await _trackingStore.InitializeAsync();
+        await _trackingStore.InitializeAsync(cancellationToken);
     }
 
-    public Task HandleFileEventAsync(FileSystemEvent e)
+    internal Task HandleFileEventAsync(FileSystemEvent e, CancellationToken cancellationToken)
     {
         return ShouldTrackFileAsync(e.FullPath).ContinueWith(shouldTrack =>
         {
@@ -45,17 +47,14 @@ public class TrackingManager : IDisposable
                 return _fileEventDebouncer.DebounceAsync(e.FullPath, e);
             }
             return Task.CompletedTask;
-        }, TaskContinuationOptions.OnlyOnRanToCompletion);
+        }, cancellationToken, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
     }
 
     private async Task OnDebouncedFileEvents(IEnumerable<FileSystemEvent> events)
     {
         foreach (var e in events)
         {
-            if (_trackingStore.IsTrackingFile(e.FullPath))
-            {
-                await ProcessFileEventAsync(e);
-            }
+            await ProcessFileEventAsync(e);
         }
     }
 
@@ -143,12 +142,7 @@ public class TrackingManager : IDisposable
             return null;
         }
 
-        var trackingFile = GetTrackingFile(filePath);
-        if (trackingFile == null)
-        {
-            return null;
-        }
-
+        var trackingFile = GetOrNewTrackingFile(filePath);
         var backupPath = GetBackupPath(trackingFile.BackupFileName);
 
         try
@@ -199,12 +193,13 @@ public class TrackingManager : IDisposable
         await semaphore.WaitAsync();
         try
         {
-            var backupDirectory = Path.GetDirectoryName(backupPath);
-            if (backupDirectory != null)
+            var backupDirectory = Path.GetDirectoryName(backupPath)!;
+            if (!Directory.Exists(backupDirectory))
             {
                 Directory.CreateDirectory(backupDirectory);
             }
-            await FileMoleUtils.CopyFileAsync(filePath, backupPath);
+
+            await FileSafe.CopyWithRetryAsync(filePath, backupPath);
 
             if (_trackingStore.TryGetTrackingFile(filePath, out var trackingFile) && trackingFile != null)
             {
@@ -242,7 +237,7 @@ public class TrackingManager : IDisposable
 
     private string GetBackupPath(string backupFileName)
     {
-        return Path.Combine(_basePath, "backups", backupFileName);
+        return Path.Combine(_basePath, Constants.BackupDirName, backupFileName);
     }
 
     private TrackingFile? GetTrackingFile(string filePath)
@@ -375,16 +370,17 @@ public class TrackingManager : IDisposable
         return trackedFiles;
     }
 
-    internal async Task SyncTrackingFilesAsync()
+    internal async Task SyncTrackingFilesAsync(CancellationToken cancellationToken)
     {
         var allTrackingFiles = _trackingStore.GetAllTrackingFiles();
         foreach (var trackingFile in allTrackingFiles)
         {
-            await SyncTrackingFileAsync(trackingFile);
+            cancellationToken.ThrowIfCancellationRequested();
+            await SyncTrackingFileAsync(trackingFile, cancellationToken);
         }
     }
 
-    private async Task SyncTrackingFileAsync(TrackingFile trackingFile)
+    private async Task SyncTrackingFileAsync(TrackingFile trackingFile, CancellationToken cancellationToken)
     {
         var filePath = trackingFile.FullPath;
         var backupPath = GetBackupPath(trackingFile.BackupFileName);
@@ -419,7 +415,6 @@ public class TrackingManager : IDisposable
             if (disposing)
             {
                 _fileEventDebouncer.Dispose();
-                _dbContext.Dispose();
                 foreach (var semaphore in _fileLocks.Values)
                 {
                     semaphore.Dispose();

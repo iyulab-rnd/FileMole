@@ -5,18 +5,18 @@ using FileMoles.Internals;
 
 namespace FileMoles;
 
-public class FileMole : IDisposable
+public class FileMole : IDisposable, IAsyncDisposable
 {
     private readonly FileMoleOptions _options;
     private readonly FileIndexer _fileIndexer;
     private readonly FMFileSystemWatcher _fileSystemWatcher;
     private readonly Dictionary<string, IStorageProvider> _storageProviders;
-    private bool _disposed = false;
+    private readonly CancellationTokenSource _cts = new();
+    private readonly Task _initializationTask;
 
     public ConfigManager Config { get; }
     public TrackingManager Tracking { get; }
 
-    // 감시 경로의 모든 파일, 디렉토리에 대한 이벤트를 수신하고 전파합니다.
     public event EventHandler<FileMoleEventArgs>? FileCreated;
     public event EventHandler<FileMoleEventArgs>? FileChanged;
     public event EventHandler<FileMoleEventArgs>? FileDeleted;
@@ -27,7 +27,6 @@ public class FileMole : IDisposable
     public event EventHandler<FileMoleEventArgs>? DirectoryDeleted;
     public event EventHandler<FileMoleEventArgs>? DirectoryRenamed;
 
-    // 추적 중인 파일의 내용이 변경될 때 발생합니다.
     public event EventHandler<FileContentChangedEventArgs>? FileContentChanged;
 
     public bool IsInitialScanComplete { get; private set; }
@@ -35,16 +34,20 @@ public class FileMole : IDisposable
 
     internal FileMole(FileMoleOptions options)
     {
+        var dataPath = options.GetDataPath();
+
         _options = options;
-        _fileIndexer = new FileIndexer(Functions.GetDatabasePath(options.GetDataPath()));
+        _fileIndexer = new FileIndexer(Path.Combine(dataPath, Constants.DbFileName));
         _fileSystemWatcher = new FMFileSystemWatcher(options, _fileIndexer);
         _storageProviders = [];
 
-        Config = new ConfigManager(Path.Combine(options.GetDataPath(), "config"));
-        Tracking = new TrackingManager(options.GetDataPath(), options.DebounceTime, OnFileContentChanged);
+        Config = new ConfigManager(dataPath);
+        Tracking = new TrackingManager(dataPath, options.DebounceTime, Config, OnFileContentChanged);
 
         InitializeStorageProviders();
         InitializeFileWatcher();
+
+        _initializationTask = InitializeAsync(_cts.Token);
     }
 
     private void InitializeStorageProviders()
@@ -74,6 +77,30 @@ public class FileMole : IDisposable
         }
     }
 
+    private async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Tracking.InitializeAsync(cancellationToken);
+            await InitialScanAsync(cancellationToken);
+            IsInitialScanComplete = true;
+            InitialScanCompleted?.Invoke(this, EventArgs.Empty);
+        }
+        catch (OperationCanceledException)
+        {
+            // 작업이 취소되면 아무것도 하지 않음
+        }
+    }
+
+    private async Task InitialScanAsync(CancellationToken cancellationToken)
+    {
+        foreach (var mole in _options.Moles)
+        {
+            await ScanDirectoryAsync(mole.Path, cancellationToken);
+        }
+        await Tracking.SyncTrackingFilesAsync(cancellationToken);
+    }
+
     private void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
     {
         raiseEvent(e);
@@ -82,7 +109,7 @@ public class FileMole : IDisposable
     private async Task HandleFileEventAsync(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
     {
         raiseEvent(e);
-        await Tracking.HandleFileEventAsync(e);
+        await Tracking.HandleFileEventAsync(e, _cts.Token);
     }
 
     private void RaiseDirectoryCreatedEvent(FileSystemEvent internalEvent)
@@ -223,43 +250,33 @@ public class FileMole : IDisposable
         await _fileIndexer.ClearDatabaseAsync();
     }
 
-    public void StartInitialScan()
-    {
-        Task.Run(async () =>
-        {
-            await InitialScanAsync();
-            IsInitialScanComplete = true;
-            InitialScanCompleted?.Invoke(this, EventArgs.Empty);
-        });
-    }
-
-    private async Task InitialScanAsync()
-    {
-        foreach (var mole in _options.Moles)
-        {
-            await ScanDirectoryAsync(mole.Path);
-        }
-        await Tracking.SyncTrackingFilesAsync();
-    }
-
-    private async Task ScanDirectoryAsync(string path)
+    private async Task ScanDirectoryAsync(string path, CancellationToken cancellationToken)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var files = await _storageProviders[path].GetFilesAsync(path);
             foreach (var file in files)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (file.Length <= _options.MaxFileSizeBytes)
                 {
-                    await _fileIndexer.IndexFileAsync(file);
+                    await _fileIndexer.IndexFileAsync(file, cancellationToken);
                 }
             }
 
             var directories = await _storageProviders[path].GetDirectoriesAsync(path);
             foreach (var directory in directories)
             {
-                await ScanDirectoryAsync(directory.FullName);
+                cancellationToken.ThrowIfCancellationRequested();
+                await ScanDirectoryAsync(directory.FullName, cancellationToken);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // 작업이 취소되면 예외를 다시 던짐
+            throw;
         }
         catch (Exception ex)
         {
@@ -276,6 +293,11 @@ public class FileMole : IDisposable
             .FirstOrDefault();
     }
 
+    #region Dispose
+
+    private bool _disposed = false;
+    private readonly SemaphoreSlim _disposeLock = new(1, 1);
+
     public void Dispose()
     {
         Dispose(true);
@@ -284,24 +306,89 @@ public class FileMole : IDisposable
 
     protected virtual void Dispose(bool disposing)
     {
-        if (!_disposed)
+        if (_disposed)
+            return;
+
+        if (disposing)
         {
-            if (disposing)
+            _disposeLock.Wait();
+            try
             {
+                _cts.Cancel();
+                try
+                {
+                    _initializationTask.Wait();
+                }
+                catch (AggregateException ae)
+                {
+                    if (ae.InnerException is not OperationCanceledException)
+                    {
+                        throw;
+                    }
+                }
+                _cts.Dispose();
                 _fileSystemWatcher.Dispose();
-                (_fileIndexer as IDisposable)?.Dispose();
+                _fileIndexer.Dispose();
                 foreach (var provider in _storageProviders.Values)
                 {
-                    (provider as IDisposable)?.Dispose();
+                    provider.Dispose();
                 }
                 Tracking.Dispose();
 
-                // Ensure that all file handles are released
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
+                // DbContext 명시적 정리
+                Resolver.DbContext?.Dispose();
+            }
+            finally
+            {
+                _disposeLock.Release();
+            }
+        }
+
+        _disposed = true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _disposeLock.WaitAsync();
+        try
+        {
+            if (_disposed)
+                return;
+
+            _cts.Cancel();
+            try
+            {
+                await _initializationTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // 예상된 예외이므로 무시
+            }
+
+            _cts.Dispose();
+            _fileSystemWatcher.Dispose();
+            await _fileIndexer.DisposeAsync();
+            foreach (var provider in _storageProviders.Values)
+            {
+                provider.Dispose();
+            }
+            Tracking.Dispose();
+
+            // DbContext 명시적 정리
+            if (Resolver.DbContext != null)
+            {
+                await Resolver.DbContext.DisposeAsync();
             }
 
             _disposed = true;
         }
+        finally
+        {
+            _disposeLock.Release();
+        }
+
+        GC.SuppressFinalize(this);
     }
+
+    #endregion
 }

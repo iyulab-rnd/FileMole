@@ -4,7 +4,7 @@ namespace FileMoles.Utils;
 
 internal class HashGenerator
 {
-    public async Task<string> GenerateHashAsync(string filePath)
+    public async Task<string> GenerateHashAsync(string filePath, CancellationToken cancellationToken = default)
     {
         const int maxRetries = 3;
         const int delayBetweenRetries = 100; // milliseconds
@@ -15,12 +15,12 @@ internal class HashGenerator
             {
                 using var md5 = MD5.Create();
                 using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                var hash = await md5.ComputeHashAsync(stream);
+                var hash = await md5.ComputeHashAsync(stream, cancellationToken);
                 return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
             }
             catch (IOException) when (attempt < maxRetries - 1)
             {
-                await Task.Delay(delayBetweenRetries);
+                await Task.Delay(delayBetweenRetries, cancellationToken);
             }
         }
 

@@ -189,4 +189,9 @@ public class LocalStorageProvider : IStorageProvider
             CopyDirectory(dir, destDir);
         }
     }
+
+    public void Dispose()
+    {
+        GC.SuppressFinalize(this);
+    }
 }

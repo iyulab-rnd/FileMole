@@ -25,7 +25,7 @@ internal class FMFileSystemWatcher : IDisposable
 
     public FMFileSystemWatcher(FileMoleOptions options, FileIndexer fileIndexer)
     {
-        _ignoreManager = new IgnoreManager(Path.Combine(options.GetDataPath(), ".ignore"));
+        _ignoreManager = new IgnoreManager(Path.Combine(options.GetDataPath(), Constants.MonitoringIgnoreFileName));
         _fileIndexer = fileIndexer;
     }
 
@@ -33,7 +33,7 @@ internal class FMFileSystemWatcher : IDisposable
     {
         if (_watchers.ContainsKey(path))
         {
-            return Task.CompletedTask; // 이미 이 디렉토리를 감시하고 있음
+            return Task.CompletedTask;
         }
 
         var watcher = new FileSystemWatcher(path)
@@ -68,7 +68,7 @@ internal class FMFileSystemWatcher : IDisposable
         }
         catch (Exception)
         {
-            
+
         }
     }
 
@@ -107,7 +107,7 @@ internal class FMFileSystemWatcher : IDisposable
         }
         catch (Exception)
         {
-            
+
         }
 
         _processingTasks.TryRemove(fullPath, out _);
@@ -130,7 +130,6 @@ internal class FMFileSystemWatcher : IDisposable
         }
         catch (Exception)
         {
-            // Handle or log the exception
         }
     }
 
@@ -151,7 +150,6 @@ internal class FMFileSystemWatcher : IDisposable
         }
         catch (Exception)
         {
-            // Handle or log the exception
         }
     }
 
@@ -197,7 +195,6 @@ internal class FMFileSystemWatcher : IDisposable
         }
         catch (Exception)
         {
-            // Handle or log the exception
         }
     }
 

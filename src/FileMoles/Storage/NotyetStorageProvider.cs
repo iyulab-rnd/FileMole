@@ -52,5 +52,10 @@ namespace FileMoles.Storage
         {
             throw new NotImplementedException();
         }
+
+        public void Dispose()
+        {
+            GC.SuppressFinalize(this);
+        }
     }
 }

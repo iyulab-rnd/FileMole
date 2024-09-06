@@ -7,7 +7,6 @@ namespace FileMoles.Data;
 internal class DbContext : IDisposable, IAsyncDisposable
 {
     private readonly SqliteConnection _connection;
-    private bool _disposed = false;
     private readonly SemaphoreSlim _transactionSemaphore = new(1, 1);
     private readonly ConcurrentDictionary<int, DbTransaction> _transactions = new();
 
@@ -46,43 +45,43 @@ internal class DbContext : IDisposable, IAsyncDisposable
         }
     }
 
-    internal async Task<SqliteConnection> GetOpenConnectionAsync()
+    internal async Task<SqliteConnection> GetOpenConnectionAsync(CancellationToken cancellationToken)
     {
         if (_connection.State != System.Data.ConnectionState.Open)
         {
-            await _connection.OpenAsync();
+            await _connection.OpenAsync(cancellationToken);
         }
         return _connection;
     }
 
-    internal async Task ExecuteInTransactionAsync(Func<SqliteConnection, Task> action)
+    internal async Task ExecuteInTransactionAsync(Func<SqliteConnection, CancellationToken, Task> action, CancellationToken cancellationToken)
     {
-        await _transactionSemaphore.WaitAsync();
+        await _transactionSemaphore.WaitAsync(cancellationToken);
         try
         {
-            await using var connection = await GetOpenConnectionAsync();
+            await using var connection = await GetOpenConnectionAsync(cancellationToken);
             var threadId = Environment.CurrentManagedThreadId;
 
             if (!_transactions.TryGetValue(threadId, out DbTransaction transaction))
             {
-                transaction = await connection.BeginTransactionAsync();
+                transaction = await connection.BeginTransactionAsync(cancellationToken);
                 _transactions[threadId] = transaction;
             }
 
             try
             {
-                await action(connection);
+                await action(connection, cancellationToken);
 
                 if (_transactions.TryRemove(threadId, out var removedTransaction))
                 {
-                    await removedTransaction.CommitAsync();
+                    await removedTransaction.CommitAsync(cancellationToken);
                 }
             }
             catch
             {
                 if (_transactions.TryRemove(threadId, out var removedTransaction))
                 {
-                    await removedTransaction.RollbackAsync();
+                    await removedTransaction.RollbackAsync(cancellationToken);
                 }
                 throw;
             }
@@ -93,27 +92,27 @@ internal class DbContext : IDisposable, IAsyncDisposable
         }
     }
 
-    internal async Task<T> ExecuteInTransactionAsync<T>(Func<SqliteConnection, Task<T>> action)
+    internal async Task<T> ExecuteInTransactionAsync<T>(Func<SqliteConnection, CancellationToken, Task<T>> action, CancellationToken cancellationToken)
     {
-        await _transactionSemaphore.WaitAsync();
+        await _transactionSemaphore.WaitAsync(cancellationToken);
         try
         {
-            await using var connection = await GetOpenConnectionAsync();
+            await using var connection = await GetOpenConnectionAsync(cancellationToken);
             var threadId = Environment.CurrentManagedThreadId;
 
             if (!_transactions.TryGetValue(threadId, out DbTransaction transaction))
             {
-                transaction = await connection.BeginTransactionAsync();
+                transaction = await connection.BeginTransactionAsync(cancellationToken);
                 _transactions[threadId] = transaction;
             }
 
             try
             {
-                var result = await action(connection);
+                var result = await action(connection, cancellationToken);
 
                 if (_transactions.TryRemove(threadId, out var removedTransaction))
                 {
-                    await removedTransaction.CommitAsync();
+                    await removedTransaction.CommitAsync(cancellationToken);
                 }
 
                 return result;
@@ -122,7 +121,7 @@ internal class DbContext : IDisposable, IAsyncDisposable
             {
                 if (_transactions.TryRemove(threadId, out var removedTransaction))
                 {
-                    await removedTransaction.RollbackAsync();
+                    await removedTransaction.RollbackAsync(cancellationToken);
                 }
                 throw;
             }
@@ -132,6 +131,11 @@ internal class DbContext : IDisposable, IAsyncDisposable
             _transactionSemaphore.Release();
         }
     }
+
+    #region Dispose
+
+    private bool _disposed = false;
+    private readonly SemaphoreSlim _disposeLock = new(1, 1);
 
     public void Dispose()
     {
@@ -141,30 +145,52 @@ internal class DbContext : IDisposable, IAsyncDisposable
 
     protected virtual void Dispose(bool disposing)
     {
-        if (!_disposed)
-        {
-            if (disposing)
-            {
-                _connection?.Close();
-                _connection?.Dispose();
-            }
+        if (_disposed)
+            return;
 
-            _disposed = true;
+        if (disposing)
+        {
+            _disposeLock.Wait();
+            try
+            {
+                if (_connection != null)
+                {
+                    _connection.Close();
+                    _connection.Dispose();
+                }
+            }
+            finally
+            {
+                _disposeLock.Release();
+            }
         }
+
+        _disposed = true;
     }
 
     public async ValueTask DisposeAsync()
     {
-        await DisposeAsyncCore().ConfigureAwait(false);
-        Dispose(false);
+        await _disposeLock.WaitAsync();
+        try
+        {
+            if (_disposed)
+                return;
+
+            if (_connection != null)
+            {
+                await _connection.CloseAsync();
+                await _connection.DisposeAsync();
+            }
+
+            _disposed = true;
+        }
+        finally
+        {
+            _disposeLock.Release();
+        }
+
+        GC.SuppressFinalize(this);
     }
 
-    protected virtual async ValueTask DisposeAsyncCore()
-    {
-        if (_connection != null)
-        {
-            await _connection.CloseAsync().ConfigureAwait(false);
-            await _connection.DisposeAsync().ConfigureAwait(false);
-        }
-    }
+    #endregion
 }

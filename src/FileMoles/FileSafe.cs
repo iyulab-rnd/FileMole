@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace FileMoles;
 
@@ -8,7 +9,7 @@ public static class FileSafe
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _pathLocks = new();
     private static bool _isDisposed = false;
 
-    [System.Diagnostics.DebuggerStepThrough]
+    [DebuggerStepThrough]
     public static async Task WriteAllTextWithRetryAsync(string path, string contents, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
         if (_isDisposed) throw new ObjectDisposedException(nameof(FileSafe));
@@ -63,13 +64,13 @@ public static class FileSafe
         }
     }
 
+    [DebuggerStepThrough]
     public static async void WriteAllTextWithRetry(string path, string contents, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
         await WriteAllTextWithRetryAsync(path, contents, maxRetries, delayMilliseconds, cancellationToken);
     }
 
-    [System.Diagnostics.DebuggerStepThrough]
-    public static async Task DeleteRetryAsync(string path, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
+    public static async Task DeleteRetryAsync(string path, int maxRetries = 5, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
         if (_isDisposed) throw new ObjectDisposedException(nameof(FileSafe));
 
@@ -132,6 +133,120 @@ public static class FileSafe
         await DeleteRetryAsync(path, maxRetries, delayMilliseconds, cancellationToken);
     }
 
+    [DebuggerStepThrough]
+    public static async Task CopyWithRetryAsync(string sourcePath, string destinationPath, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
+    {
+        if (_isDisposed) throw new ObjectDisposedException(nameof(FileSafe));
+
+        if (File.Exists(sourcePath))
+        {
+            await CopyFileWithRetryAsync(sourcePath, destinationPath, maxRetries, delayMilliseconds, cancellationToken);
+        }
+        else if (Directory.Exists(sourcePath))
+        {
+            await CopyDirectoryWithRetryAsync(sourcePath, destinationPath, maxRetries, delayMilliseconds, cancellationToken);
+        }
+        else
+        {
+            throw new FileNotFoundException($"Source path not found: {sourcePath}");
+        }
+    }
+
+    [DebuggerStepThrough]
+    private static async Task CopyFileWithRetryAsync(string sourcePath, string destinationPath, int maxRetries, int delayMilliseconds, CancellationToken cancellationToken)
+    {
+        SemaphoreSlim sourceSemaphore = _pathLocks.GetOrAdd(sourcePath, _ => new SemaphoreSlim(1, 1));
+        SemaphoreSlim destSemaphore = _pathLocks.GetOrAdd(destinationPath, _ => new SemaphoreSlim(1, 1));
+
+        try
+        {
+            using (FileStream sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous))
+            {
+                Task sourceWaitTask = sourceSemaphore.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+                Task destWaitTask = destSemaphore.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+
+                await Task.WhenAll(sourceWaitTask, destWaitTask);
+
+                if (!sourceWaitTask.IsCompletedSuccessfully || !destWaitTask.IsCompletedSuccessfully)
+                {
+                    throw new TimeoutException($"Timeout waiting for lock on files: {sourcePath} or {destinationPath}");
+                }
+
+                try
+                {
+                    for (int i = 0; i < maxRetries; i++)
+                    {
+                        try
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+
+                            using (FileStream destStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous))
+                            {
+                                await sourceStream.CopyToAsync(destStream, 81920, cancellationToken);
+                            }
+
+                            return; // 성공적으로 복사 완료
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex) when (i < maxRetries - 1 && (ex is IOException || ex is UnauthorizedAccessException))
+                        {
+                            await Task.Delay(delayMilliseconds, cancellationToken);
+                        }
+                    }
+                    throw new IOException($"Failed to copy file after {maxRetries} attempts: {sourcePath} to {destinationPath}");
+                }
+                finally
+                {
+                    sourceSemaphore.Release();
+                    destSemaphore.Release();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+    }
+
+    [DebuggerStepThrough]
+    private static async Task CopyDirectoryWithRetryAsync(string sourceDir, string destDir, int maxRetries, int delayMilliseconds, CancellationToken cancellationToken)
+    {
+        var dir = new DirectoryInfo(sourceDir);
+
+        if (!dir.Exists)
+        {
+            throw new DirectoryNotFoundException($"Source directory not found: {dir.FullName}");
+        }
+
+        DirectoryInfo[] dirs = dir.GetDirectories();
+
+        // 대상 디렉토리가 없으면 생성
+        Directory.CreateDirectory(destDir);
+
+        // 파일 복사
+        foreach (FileInfo file in dir.GetFiles())
+        {
+            string targetFilePath = Path.Combine(destDir, file.Name);
+            await CopyFileWithRetryAsync(file.FullName, targetFilePath, maxRetries, delayMilliseconds, cancellationToken);
+        }
+
+        // 하위 디렉토리 재귀적으로 복사
+        foreach (DirectoryInfo subDir in dirs)
+        {
+            string newDestinationDir = Path.Combine(destDir, subDir.Name);
+            await CopyDirectoryWithRetryAsync(subDir.FullName, newDestinationDir, maxRetries, delayMilliseconds, cancellationToken);
+        }
+    }
+
+    [DebuggerStepThrough]
+    public static async void CopyWithRetry(string sourcePath, string destinationPath, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
+    {
+        await CopyWithRetryAsync(sourcePath, destinationPath, maxRetries, delayMilliseconds, cancellationToken);
+    }
+
     public static void Dispose()
     {
         if (!_isDisposed)
@@ -145,4 +260,5 @@ public static class FileSafe
             _isDisposed = true;
         }
     }
+
 }

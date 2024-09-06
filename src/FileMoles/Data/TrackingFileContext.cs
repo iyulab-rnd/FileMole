@@ -18,11 +18,11 @@ internal class TrackingFileContext
         _dbContext = dbContext;
     }
 
-    public async Task<bool> AddTrackingFileAsync(TrackingFile trackingFile)
+    public async Task<bool> AddTrackingFileAsync(TrackingFile trackingFile, CancellationToken cancellationToken)
     {
         try
         {
-            await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            await _dbContext.ExecuteInTransactionAsync(async (connection, ct) =>
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = @"
@@ -35,37 +35,35 @@ internal class TrackingFileContext
                 command.Parameters.AddWithValue("@IsDirectory", trackingFile.IsDirectory ? 1 : 0);
                 command.Parameters.AddWithValue("@LastTrackedTime", trackingFile.LastTrackedTime.ToString("o"));
 
-                await command.ExecuteNonQueryAsync();
-            });
+                await command.ExecuteNonQueryAsync(ct);
+            }, cancellationToken);
 
             return true;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error adding tracking file: {ex.Message}");
-            // 여기서 예외를 다시 throw하지 않고 false를 반환합니다.
-            // 만약 호출자가 예외 처리를 원한다면, throw를 유지할 수 있습니다.
             return false;
         }
     }
 
-    public async Task<bool> RemoveTrackingFileAsync(string fullPath)
+    public async Task<bool> RemoveTrackingFileAsync(string fullPath, CancellationToken cancellationToken)
     {
         try
         {
-            await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            await _dbContext.ExecuteInTransactionAsync(async (connection, ct) =>
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = "DELETE FROM TrackingFile WHERE FullPath = @FullPath";
                 command.Parameters.AddWithValue("@FullPath", fullPath);
 
-                int rowsAffected = await command.ExecuteNonQueryAsync();
+                int rowsAffected = await command.ExecuteNonQueryAsync(ct);
 
                 if (rowsAffected == 0)
                 {
                     throw new Exception($"No tracking file found with path: {fullPath}");
                 }
-            });
+            }, cancellationToken);
 
             return true;
         }
@@ -76,20 +74,20 @@ internal class TrackingFileContext
         }
     }
 
-    public async Task<List<TrackingFile>> GetAllTrackingFilesAsync()
+    public async Task<List<TrackingFile>> GetAllTrackingFilesAsync(CancellationToken cancellationToken)
     {
         try
         {
             var results = new List<TrackingFile>();
 
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             await using var command = connection.CreateCommand();
             command.CommandText = @"
             SELECT Id, BackupFileName, FullPath, IsDirectory, LastTrackedTime 
             FROM TrackingFile";
 
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
             {
                 var trackingFile = new TrackingFile(
                     reader.GetString(reader.GetOrdinal("FullPath")),
@@ -111,16 +109,16 @@ internal class TrackingFileContext
         }
     }
 
-    public async Task<TrackingFile?> GetTrackingFileAsync(string fullPath)
+    public async Task<TrackingFile?> GetTrackingFileAsync(string fullPath, CancellationToken cancellationToken)
     {
         try
         {
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT Id, BackupFileName, FullPath, IsDirectory, LastTrackedTime FROM TrackingFile WHERE FullPath = @FullPath";
             command.Parameters.AddWithValue("@FullPath", fullPath);
-            using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
             {
                 return new TrackingFile(reader.GetString(2), reader.GetInt32(3) == 1)
                 {
@@ -138,16 +136,16 @@ internal class TrackingFileContext
         }
     }
 
-    public async Task<TrackingFile?> GetTrackingFileByBackupFileNameAsync(string backupFileName)
+    public async Task<TrackingFile?> GetTrackingFileByBackupFileNameAsync(string backupFileName, CancellationToken cancellationToken)
     {
         try
         {
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT Id, BackupFileName, FullPath, IsDirectory, LastTrackedTime FROM TrackingFile WHERE BackupFileName = @BackupFileName";
             command.Parameters.AddWithValue("@BackupFileName", backupFileName);
-            using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
             {
                 return new TrackingFile(reader.GetString(2), reader.GetInt32(3) == 1)
                 {
@@ -165,18 +163,18 @@ internal class TrackingFileContext
         }
     }
 
-    public async Task<bool> UpdateLastTrackedTimeAsync(string fullPath, DateTime lastTrackedTime)
+    public async Task<bool> UpdateLastTrackedTimeAsync(string fullPath, DateTime lastTrackedTime, CancellationToken cancellationToken)
     {
         try
         {
-            return await _dbContext.ExecuteInTransactionAsync(async (connection) =>
+            return await _dbContext.ExecuteInTransactionAsync(async (connection, ct) =>
             {
                 using var command = connection.CreateCommand();
                 command.CommandText = "UPDATE TrackingFile SET LastTrackedTime = @LastTrackedTime WHERE FullPath = @FullPath";
                 command.Parameters.AddWithValue("@LastTrackedTime", lastTrackedTime.ToString("o"));
                 command.Parameters.AddWithValue("@FullPath", fullPath);
-                return await command.ExecuteNonQueryAsync() > 0;
-            });
+                return await command.ExecuteNonQueryAsync(ct) > 0;
+            }, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -185,31 +183,31 @@ internal class TrackingFileContext
         }
     }
 
-    public Task<bool> IsTrackingFileAsync(string path)
+    public async Task<bool> IsTrackingFileAsync(string path, CancellationToken cancellationToken)
     {
         if (Directory.Exists(path))
         {
-            return IsDirectoryTrackedAsync(path);
+            return await IsDirectoryTrackedAsync(path, cancellationToken);
         }
         else if (File.Exists(path))
         {
-            return IsFileTrackedAsync(path);
+            return await IsFileTrackedAsync(path, cancellationToken);
         }
         else
         {
-            return Task.FromResult(false);
+            return false;
         }
     }
 
-    private async Task<bool> IsDirectoryTrackedAsync(string directoryPath)
+    private async Task<bool> IsDirectoryTrackedAsync(string directoryPath, CancellationToken cancellationToken)
     {
         try
         {
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM TrackingFile WHERE FullPath = @FullPath AND IsDirectory = 1";
             command.Parameters.AddWithValue("@FullPath", directoryPath);
-            var result = await command.ExecuteScalarAsync();
+            var result = await command.ExecuteScalarAsync(cancellationToken);
             return Convert.ToInt32(result) > 0;
         }
         catch (Exception ex)
@@ -219,15 +217,15 @@ internal class TrackingFileContext
         }
     }
 
-    private async Task<bool> IsFileTrackedAsync(string filePath)
+    private async Task<bool> IsFileTrackedAsync(string filePath, CancellationToken cancellationToken)
     {
         try
         {
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM TrackingFile WHERE FullPath = @FullPath AND IsDirectory = 0";
             command.Parameters.AddWithValue("@FullPath", filePath);
-            var result = await command.ExecuteScalarAsync();
+            var result = await command.ExecuteScalarAsync(cancellationToken);
             return Convert.ToInt32(result) > 0;
         }
         catch (Exception ex)
@@ -237,17 +235,17 @@ internal class TrackingFileContext
         }
     }
 
-    public async Task<List<string>> GetTrackedFilesInDirectoryAsync(string directoryPath)
+    public async Task<List<string>> GetTrackedFilesInDirectoryAsync(string directoryPath, CancellationToken cancellationToken)
     {
         try
         {
-            await using var connection = await _dbContext.GetOpenConnectionAsync();
+            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT FullPath FROM TrackingFile WHERE FullPath LIKE @DirectoryPath AND IsDirectory = 0";
             command.Parameters.AddWithValue("@DirectoryPath", directoryPath + "%");
             var results = new List<string>();
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
             {
                 results.Add(reader.GetString(0));
             }

@@ -1,5 +1,4 @@
-﻿
-namespace FileMoles;
+﻿namespace FileMoles;
 
 public class FileMoleOptions
 {
