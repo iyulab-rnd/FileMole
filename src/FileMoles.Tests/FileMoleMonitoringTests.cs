@@ -1,10 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using Xunit;
-
-namespace FileMoles.Tests;
+﻿namespace FileMoles.Tests;
 
 public class FileMoleMonitoringTests
 {
@@ -13,7 +7,7 @@ public class FileMoleMonitoringTests
         var options = new FileMoleOptions
         {
             DataPath = Path.Combine(testDirectory, "FileMoleData"),
-            Moles = new List<Mole> { new Mole { Path = testDirectory, Type = MoleType.Local } }
+            Moles = [new() { Path = testDirectory, Type = MoleType.Local }]
         };
 
         return new FileMoleBuilder()
@@ -23,7 +17,7 @@ public class FileMoleMonitoringTests
 
     private async Task<(string directory, FileMole mole)> SetupTestEnvironment()
     {
-        var testDirectory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var testDirectory = Path.Combine(Path.GetTempPath(), "FileMoleMonitoringTests", Path.GetRandomFileName());
         Directory.CreateDirectory(testDirectory);
         var fileMole = CreateFileMole(testDirectory);
         await Task.Delay(100); // Short delay for setup
@@ -32,9 +26,18 @@ public class FileMoleMonitoringTests
 
     private async Task TearDownTestEnvironment(string testDirectory, FileMole fileMole)
     {
-        fileMole.Dispose();
-        await Task.Delay(200); // Short delay for cleanup
-        FileSafe.DeleteRetry(testDirectory);
+        await fileMole.DisposeAsync();
+
+        try
+        {
+            if (Directory.Exists(testDirectory))
+            {
+                Directory.Delete(testDirectory, true);
+            }
+        }
+        catch (Exception)
+        {
+        }
     }
 
     [Fact]

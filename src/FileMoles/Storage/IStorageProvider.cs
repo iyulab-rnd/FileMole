@@ -14,4 +14,6 @@ public interface IStorageProvider : IDisposable
     Task<bool> ExistsAsync(string path);
     Task MoveAsync(string sourcePath, string destinationPath);
     Task CopyAsync(string sourcePath, string destinationPath);
+    Task RenameAsync(string fullPath, string newFileName);
+    Task DeleteAsync(string fullPath);
 }

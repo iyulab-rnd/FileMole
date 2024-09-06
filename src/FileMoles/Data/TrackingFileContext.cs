@@ -7,7 +7,7 @@ internal class TrackingFileContext
     internal static readonly string CreateTableSql = @"
         CREATE TABLE IF NOT EXISTS TrackingFile (
             Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            BackupFileName TEXT NOT NULL UNIQUE,
+            Hash TEXT NOT NULL UNIQUE,
             FullPath TEXT NOT NULL UNIQUE,
             IsDirectory INTEGER NOT NULL,
             LastTrackedTime TEXT NOT NULL
@@ -27,10 +27,10 @@ internal class TrackingFileContext
                 await using var command = connection.CreateCommand();
                 command.CommandText = @"
             INSERT OR REPLACE INTO TrackingFile 
-            (BackupFileName, FullPath, IsDirectory, LastTrackedTime) 
-            VALUES (@BackupFileName, @FullPath, @IsDirectory, @LastTrackedTime)";
+            (Hash, FullPath, IsDirectory, LastTrackedTime) 
+            VALUES (@Hash, @FullPath, @IsDirectory, @LastTrackedTime)";
 
-                command.Parameters.AddWithValue("@BackupFileName", trackingFile.BackupFileName);
+                command.Parameters.AddWithValue("@Hash", trackingFile.Hash);
                 command.Parameters.AddWithValue("@FullPath", trackingFile.FullPath);
                 command.Parameters.AddWithValue("@IsDirectory", trackingFile.IsDirectory ? 1 : 0);
                 command.Parameters.AddWithValue("@LastTrackedTime", trackingFile.LastTrackedTime.ToString("o"));
@@ -83,7 +83,7 @@ internal class TrackingFileContext
             await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             await using var command = connection.CreateCommand();
             command.CommandText = @"
-            SELECT Id, BackupFileName, FullPath, IsDirectory, LastTrackedTime 
+            SELECT Id, Hash, FullPath, IsDirectory, LastTrackedTime 
             FROM TrackingFile";
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -94,7 +94,7 @@ internal class TrackingFileContext
                     reader.GetInt32(reader.GetOrdinal("IsDirectory")) == 1)
                 {
                     Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                    BackupFileName = reader.GetString(reader.GetOrdinal("BackupFileName")),
+                    Hash = reader.GetString(reader.GetOrdinal("Hash")),
                     LastTrackedTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastTrackedTime")))
                 };
                 results.Add(trackingFile);
@@ -115,7 +115,7 @@ internal class TrackingFileContext
         {
             await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT Id, BackupFileName, FullPath, IsDirectory, LastTrackedTime FROM TrackingFile WHERE FullPath = @FullPath";
+            command.CommandText = "SELECT Id, Hash, FullPath, IsDirectory, LastTrackedTime FROM TrackingFile WHERE FullPath = @FullPath";
             command.Parameters.AddWithValue("@FullPath", fullPath);
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (await reader.ReadAsync(cancellationToken))
@@ -123,7 +123,7 @@ internal class TrackingFileContext
                 return new TrackingFile(reader.GetString(2), reader.GetInt32(3) == 1)
                 {
                     Id = reader.GetInt32(0),
-                    BackupFileName = reader.GetString(1),
+                    Hash = reader.GetString(1),
                     LastTrackedTime = DateTime.Parse(reader.GetString(4))
                 };
             }
@@ -136,21 +136,21 @@ internal class TrackingFileContext
         }
     }
 
-    public async Task<TrackingFile?> GetTrackingFileByBackupFileNameAsync(string backupFileName, CancellationToken cancellationToken)
+    public async Task<TrackingFile?> GetTrackingFileByHashAsync(string backupFileName, CancellationToken cancellationToken)
     {
         try
         {
             await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT Id, BackupFileName, FullPath, IsDirectory, LastTrackedTime FROM TrackingFile WHERE BackupFileName = @BackupFileName";
-            command.Parameters.AddWithValue("@BackupFileName", backupFileName);
+            command.CommandText = "SELECT Id, Hash, FullPath, IsDirectory, LastTrackedTime FROM TrackingFile WHERE Hash = @Hash";
+            command.Parameters.AddWithValue("@Hash", backupFileName);
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (await reader.ReadAsync(cancellationToken))
             {
                 return new TrackingFile(reader.GetString(2), reader.GetInt32(3) == 1)
                 {
                     Id = reader.GetInt32(0),
-                    BackupFileName = reader.GetString(1),
+                    Hash = reader.GetString(1),
                     LastTrackedTime = DateTime.Parse(reader.GetString(4))
                 };
             }

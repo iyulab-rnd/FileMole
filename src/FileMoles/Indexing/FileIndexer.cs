@@ -24,10 +24,9 @@ public class FileIndexer : IDisposable, IAsyncDisposable
         {
             var fileIndex = new FileIndex(file.FullName)
             {
-                Length = file.Length,
-                CreationTime = file.CreationTime,
-                LastWriteTime = file.LastWriteTime,
-                LastAccessTime = file.LastAccessTime,
+                Size = file.Length,
+                Created = file.CreationTime,
+                Modified = file.LastWriteTime,
                 Attributes = file.Attributes
             };
 
@@ -52,11 +51,10 @@ public class FileIndexer : IDisposable, IAsyncDisposable
             {
                 file.Refresh();
 
-                if (file.CreationTime != fileIndex.CreationTime ||
-                    file.LastWriteTime != fileIndex.LastWriteTime ||
-                    file.LastAccessTime != fileIndex.LastAccessTime ||
+                if (file.CreationTime != fileIndex.Created ||
+                    file.LastWriteTime != fileIndex.Modified ||
                     file.Attributes != fileIndex.Attributes ||
-                    file.Length != fileIndex.Length)
+                    file.Length != fileIndex.Size)
                 {
                     await IndexFileAsync(file, cancellationToken);
                 }
@@ -85,10 +83,9 @@ public class FileIndexer : IDisposable, IAsyncDisposable
             return true;
         }
 
-        return indexedFile.Length != file.Length ||
-            indexedFile.CreationTime != file.CreationTime ||
-            indexedFile.LastWriteTime != file.LastWriteTime ||
-            indexedFile.LastAccessTime != file.LastAccessTime ||
+        return indexedFile.Size != file.Length ||
+            indexedFile.Created != file.CreationTime ||
+            indexedFile.Modified != file.LastWriteTime ||
             indexedFile.Attributes != file.Attributes;
     }
 

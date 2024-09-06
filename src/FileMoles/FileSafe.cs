@@ -12,7 +12,7 @@ public static class FileSafe
     [DebuggerStepThrough]
     public static async Task WriteAllTextWithRetryAsync(string path, string contents, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
-        if (_isDisposed) throw new ObjectDisposedException(nameof(FileSafe));
+        ObjectDisposedException.ThrowIf(_isDisposed, nameof(FileSafe));
 
         SemaphoreSlim semaphore = _pathLocks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
 
@@ -72,7 +72,7 @@ public static class FileSafe
 
     public static async Task DeleteRetryAsync(string path, int maxRetries = 5, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
-        if (_isDisposed) throw new ObjectDisposedException(nameof(FileSafe));
+        ObjectDisposedException.ThrowIf(_isDisposed, nameof(FileSafe));
 
         SemaphoreSlim semaphore = _pathLocks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
 
@@ -136,7 +136,7 @@ public static class FileSafe
     [DebuggerStepThrough]
     public static async Task CopyWithRetryAsync(string sourcePath, string destinationPath, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
-        if (_isDisposed) throw new ObjectDisposedException(nameof(FileSafe));
+        ObjectDisposedException.ThrowIf(_isDisposed, nameof(FileSafe));
 
         if (File.Exists(sourcePath))
         {
@@ -160,49 +160,45 @@ public static class FileSafe
 
         try
         {
-            using (FileStream sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous))
+            using FileStream sourceStream = new(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
+            Task sourceWaitTask = sourceSemaphore.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            Task destWaitTask = destSemaphore.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+
+            await Task.WhenAll(sourceWaitTask, destWaitTask);
+
+            if (!sourceWaitTask.IsCompletedSuccessfully || !destWaitTask.IsCompletedSuccessfully)
             {
-                Task sourceWaitTask = sourceSemaphore.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
-                Task destWaitTask = destSemaphore.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+                throw new TimeoutException($"Timeout waiting for lock on files: {sourcePath} or {destinationPath}");
+            }
 
-                await Task.WhenAll(sourceWaitTask, destWaitTask);
-
-                if (!sourceWaitTask.IsCompletedSuccessfully || !destWaitTask.IsCompletedSuccessfully)
+            try
+            {
+                for (int i = 0; i < maxRetries; i++)
                 {
-                    throw new TimeoutException($"Timeout waiting for lock on files: {sourcePath} or {destinationPath}");
-                }
-
-                try
-                {
-                    for (int i = 0; i < maxRetries; i++)
+                    try
                     {
-                        try
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
+                        cancellationToken.ThrowIfCancellationRequested();
 
-                            using (FileStream destStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous))
-                            {
-                                await sourceStream.CopyToAsync(destStream, 81920, cancellationToken);
-                            }
+                        using FileStream destStream = new(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous);
+                        await sourceStream.CopyToAsync(destStream, 81920, cancellationToken);
 
-                            return; // 성공적으로 복사 완료
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        catch (Exception ex) when (i < maxRetries - 1 && (ex is IOException || ex is UnauthorizedAccessException))
-                        {
-                            await Task.Delay(delayMilliseconds, cancellationToken);
-                        }
+                        return; // 성공적으로 복사 완료
                     }
-                    throw new IOException($"Failed to copy file after {maxRetries} attempts: {sourcePath} to {destinationPath}");
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex) when (i < maxRetries - 1 && (ex is IOException || ex is UnauthorizedAccessException))
+                    {
+                        await Task.Delay(delayMilliseconds, cancellationToken);
+                    }
                 }
-                finally
-                {
-                    sourceSemaphore.Release();
-                    destSemaphore.Release();
-                }
+                throw new IOException($"Failed to copy file after {maxRetries} attempts: {sourcePath} to {destinationPath}");
+            }
+            finally
+            {
+                sourceSemaphore.Release();
+                destSemaphore.Release();
             }
         }
         catch (OperationCanceledException)

@@ -10,9 +10,8 @@ internal class FileIndexContext
                 Name TEXT NOT NULL,
                 FullPath TEXT NOT NULL UNIQUE,
                 Size INTEGER NOT NULL,
-                CreationTime TEXT NOT NULL,
-                LastWriteTime TEXT NOT NULL,
-                LastAccessTime TEXT NOT NULL,
+                Created TEXT NOT NULL,
+                Modified TEXT NOT NULL,
                 Attributes INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_FileIndex_FullPath ON FileIndex(FullPath);";
@@ -31,15 +30,14 @@ internal class FileIndexContext
                 await using var command = connection.CreateCommand();
                 command.CommandText = @"
                 INSERT OR REPLACE INTO FileIndex 
-                (Name, FullPath, Size, CreationTime, LastWriteTime, LastAccessTime, Attributes) 
-                VALUES (@Name, @FullPath, @Size, @CreationTime, @LastWriteTime, @LastAccessTime, @Attributes)";
+                (Name, FullPath, Size, Created, Modified, Attributes) 
+                VALUES (@Name, @FullPath, @Size, @Created, @Modified, @Attributes)";
 
                 command.Parameters.AddWithValue("@Name", fileIndex.Name);
                 command.Parameters.AddWithValue("@FullPath", fileIndex.FullPath);
-                command.Parameters.AddWithValue("@Size", fileIndex.Length);
-                command.Parameters.AddWithValue("@CreationTime", fileIndex.CreationTime.ToString("o"));
-                command.Parameters.AddWithValue("@LastWriteTime", fileIndex.LastWriteTime.ToString("o"));
-                command.Parameters.AddWithValue("@LastAccessTime", fileIndex.LastAccessTime.ToString("o"));
+                command.Parameters.AddWithValue("@Size", fileIndex.Size);
+                command.Parameters.AddWithValue("@Created", fileIndex.Created.ToString("o"));
+                command.Parameters.AddWithValue("@Modified", fileIndex.Modified.ToString("o"));
                 command.Parameters.AddWithValue("@Attributes", (int)fileIndex.Attributes);
 
                 await command.ExecuteNonQueryAsync(ct);
@@ -70,10 +68,9 @@ internal class FileIndexContext
             {
                 results.Add(new FileIndex(reader.GetString(reader.GetOrdinal("FullPath")))
                 {
-                    Length = reader.GetInt64(reader.GetOrdinal("Size")),
-                    CreationTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("CreationTime"))),
-                    LastWriteTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastWriteTime"))),
-                    LastAccessTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastAccessTime"))),
+                    Size = reader.GetInt64(reader.GetOrdinal("Size")),
+                    Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
+                    Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
                     Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
                 });
             }
@@ -101,10 +98,9 @@ internal class FileIndexContext
             {
                 return new FileIndex(reader.GetString(reader.GetOrdinal("FullPath")))
                 {
-                    Length = reader.GetInt64(reader.GetOrdinal("Size")),
-                    CreationTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("CreationTime"))),
-                    LastWriteTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastWriteTime"))),
-                    LastAccessTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastAccessTime"))),
+                    Size = reader.GetInt64(reader.GetOrdinal("Size")),
+                    Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
+                    Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
                     Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
                 };
             }

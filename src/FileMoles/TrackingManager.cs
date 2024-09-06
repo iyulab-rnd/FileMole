@@ -3,6 +3,7 @@ using FileMoles.Diff;
 using FileMoles.Events;
 using FileMoles.Internals;
 using FileMoles.Utils;
+using NPOI.SS.Formula.Functions;
 using System.Collections.Concurrent;
 
 namespace FileMoles;
@@ -16,7 +17,7 @@ public class TrackingManager : IDisposable
     private readonly EventHandler<FileContentChangedEventArgs> _fileContentChangedHandler;
     private readonly HashGenerator _hashGenerator;
     private readonly InMemoryTrackingStore _trackingStore;
-    private bool _disposed = false;
+    private readonly ConcurrentDictionary<string, bool> _trackedDirectories = new();
 
     public TrackingManager(
         string basePath,
@@ -38,61 +39,100 @@ public class TrackingManager : IDisposable
         await _trackingStore.InitializeAsync(cancellationToken);
     }
 
-    internal Task HandleFileEventAsync(FileSystemEvent e, CancellationToken cancellationToken)
+    internal async Task SyncTrackingFilesAsync(CancellationToken cancellationToken)
     {
-        return ShouldTrackFileAsync(e.FullPath).ContinueWith(shouldTrack =>
+        var allTrackingFiles = _trackingStore.GetAllTrackingFiles();
+        foreach (var trackingFile in allTrackingFiles)
         {
-            if (shouldTrack.Result)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (trackingFile.IsDirectory)
             {
-                return _fileEventDebouncer.DebounceAsync(e.FullPath, e);
+                if (Directory.Exists(trackingFile.FullPath))
+                {
+                    foreach(var file in Directory.GetFiles(trackingFile.FullPath))
+                    {
+                        // 추적폴더내 누락된 파일을 추가합니다.
+                        if (await ShouldTrackFileAsync(file)
+                            && _trackingStore.TryGetTrackingFile(file, out _) is false)
+                        {
+                            await EnableAsync(file);
+                        }
+                    }
+                }
             }
-            return Task.CompletedTask;
-        }, cancellationToken, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+            else
+            {
+                await SyncTrackingFileAsync(trackingFile, cancellationToken);
+            }
+        }
+
+        await CleanupBackupFilesAsync(cancellationToken);
+    }
+
+    private async Task SyncTrackingFileAsync(TrackingFile trackingFile, CancellationToken cancellationToken)
+    {
+        var filePath = trackingFile.FullPath;
+        var backupPath = GetBackupPath(trackingFile.GetBackupFileName());
+
+        if (!File.Exists(filePath) && !Directory.Exists(filePath))
+        {
+            // 실제 파일/디렉토리가 없는 경우
+            await RemoveTrackedFileAndBackupAsync(filePath);
+        }
+        else if (!File.Exists(backupPath) && File.Exists(filePath))
+        {
+            // 백업 파일이 없지만 실제 파일이 존재하는 경우
+            await TrackFileAsync(filePath, trackingFile.GetBackupFileName());
+        }
+        else if (File.Exists(backupPath) && File.Exists(filePath))
+        {
+            // 백업 파일과 실제 파일이 모두 존재하는 경우, 해시 비교
+            var currentHash = await _hashGenerator.GenerateHashAsync(filePath, cancellationToken);
+            var backupHash = await _hashGenerator.GenerateHashAsync(backupPath, cancellationToken);
+
+            if (currentHash != backupHash)
+            {
+                await TrackFileAsync(filePath, trackingFile.GetBackupFileName());
+            }
+        }
+    }
+
+    private async Task CleanupBackupFilesAsync(CancellationToken cancellationToken)
+    {
+        var backupDirectory = Path.Combine(_basePath, Constants.BackupDirName);
+        if (!Directory.Exists(backupDirectory))
+        {
+            return;
+        }
+
+        var backupFiles = Directory.GetFiles(backupDirectory, "*", SearchOption.AllDirectories);
+        var trackedFiles = _trackingStore.GetAllTrackingFiles().ToDictionary(tf => tf.Hash, tf => tf);
+
+        foreach (var backupFile in backupFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var fileName = Path.GetFileNameWithoutExtension(backupFile);
+            if (!trackedFiles.ContainsKey(fileName))
+            {
+                try
+                {
+                    await FileSafe.DeleteRetryAsync(backupFile, cancellationToken: cancellationToken);
+                    Console.WriteLine($"Removed unused backup file: {backupFile}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error removing unused backup file {backupFile}: {ex.Message}");
+                }
+            }
+        }
     }
 
     private async Task OnDebouncedFileEvents(IEnumerable<FileSystemEvent> events)
     {
-        foreach (var e in events)
+        foreach (var e in events.ToList())
         {
             await ProcessFileEventAsync(e);
-        }
-    }
-
-    private async Task ProcessFileEventAsync(FileSystemEvent e)
-    {
-        try
-        {
-            switch (e.ChangeType)
-            {
-                case WatcherChangeTypes.Created:
-                case WatcherChangeTypes.Changed:
-                    if (await HasFileChangedAsync(e.FullPath))
-                    {
-                        var diff = await TrackAndGetDiffAsync(e.FullPath);
-                        if (diff != null && (diff.IsChanged || diff.IsInitial))
-                        {
-                            _fileContentChangedHandler.Invoke(this, new FileContentChangedEventArgs(e, diff));
-                        }
-                    }
-                    break;
-                case WatcherChangeTypes.Deleted:
-                    RemoveTrackedFile(e.FullPath);
-                    break;
-                case WatcherChangeTypes.Renamed:
-                    if (e.OldFullPath != null)
-                    {
-                        RemoveTrackedFile(e.OldFullPath);
-                    }
-                    if (await ShouldTrackFileAsync(e.FullPath))
-                    {
-                        await ProcessFileEventAsync(new FileSystemEvent(WatcherChangeTypes.Created, e.FullPath));
-                    }
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error processing file event for {e.FullPath}: {ex.Message}");
         }
     }
 
@@ -115,7 +155,7 @@ public class TrackingManager : IDisposable
             return true; // Tracking file is null, treat as a new file
         }
 
-        var backupPath = GetBackupPath(trackingFile.BackupFileName);
+        var backupPath = GetBackupPath(trackingFile.GetBackupFileName());
         var backupInfo = new FileInfo(backupPath);
 
         if (!backupInfo.Exists)
@@ -143,7 +183,7 @@ public class TrackingManager : IDisposable
         }
 
         var trackingFile = GetOrNewTrackingFile(filePath);
-        var backupPath = GetBackupPath(trackingFile.BackupFileName);
+        var backupPath = GetBackupPath(trackingFile.GetBackupFileName());
 
         try
         {
@@ -173,7 +213,7 @@ public class TrackingManager : IDisposable
 
             if (diff.IsChanged || diff.IsInitial)
             {
-                await TrackFileAsync(filePath, trackingFile.BackupFileName);
+                await TrackFileAsync(filePath, trackingFile.GetBackupFileName());
             }
 
             return diff;
@@ -213,28 +253,6 @@ public class TrackingManager : IDisposable
         }
     }
 
-    private void RemoveTrackedFile(string filePath)
-    {
-        if (_trackingStore.TryGetTrackingFile(filePath, out var trackingFile))
-        {
-            var backupPath = GetBackupPath(trackingFile!.BackupFileName);
-
-            try
-            {
-                if (File.Exists(backupPath))
-                {
-                    Task.Run(() => FileSafe.DeleteRetryAsync(backupPath)).Forget();
-                }
-
-                _trackingStore.RemoveTrackingFile(filePath);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to remove tracked file: {filePath}", ex);
-            }
-        }
-    }
-
     private string GetBackupPath(string backupFileName)
     {
         return Path.Combine(_basePath, Constants.BackupDirName, backupFileName);
@@ -263,7 +281,19 @@ public class TrackingManager : IDisposable
 
     private Task<bool> ShouldTrackFileAsync(string filePath)
     {
-        return Task.FromResult(_configManager.ShouldTrackFile(filePath) || _trackingStore.IsTrackingFile(filePath));
+        // 이미 추적대상인 파일
+        if (_trackingStore.IsTrackingFile(filePath)) 
+            return Task.FromResult(true);
+
+        // 추적 폴더내 속한 파일
+        else if (File.Exists(filePath) && 
+            _trackingStore.IsTrackingFile(Path.GetDirectoryName(filePath)!) &&
+            _configManager.ShouldTrackFile(filePath))
+        {
+            return Task.FromResult(true);
+        }
+        
+        return Task.FromResult(false);
     }
 
     public async Task<bool> EnableAsync(string path)
@@ -280,6 +310,7 @@ public class TrackingManager : IDisposable
         {
             if (isDirectory)
             {
+                _trackedDirectories[path] = true;
                 await InitializeTrackedFilesAsync(path);
             }
             else
@@ -292,21 +323,121 @@ public class TrackingManager : IDisposable
         return true;
     }
 
-    private async Task TrackSingleFileAsync(string filePath)
-    {
-        if (await ShouldTrackFileAsync(filePath))
-        {
-            var trackingFile = GetOrNewTrackingFile(filePath);
-            await TrackFileAsync(filePath, trackingFile.BackupFileName);
-        }
-    }
-
     private async Task InitializeTrackedFilesAsync(string directoryPath)
     {
         var files = await GetTrackedFilesAsync(directoryPath);
         foreach (var file in files)
         {
             await TrackSingleFileAsync(file);
+        }
+    }
+
+    internal async Task HandleFileEventAsync(FileSystemEvent e, CancellationToken cancellationToken)
+    {
+        if (e.IsDirectory)
+        {
+            await HandleDirectoryEventAsync(e, cancellationToken);
+        }
+        else
+        {
+            await HandleFileEventInternalAsync(e, cancellationToken);
+        }
+    }
+
+    private async Task HandleDirectoryEventAsync(FileSystemEvent e, CancellationToken cancellationToken)
+    {
+        switch (e.ChangeType)
+        {
+            case WatcherChangeTypes.Created:
+                if (IsInTrackedDirectory(e.FullPath))
+                {
+                    await EnableAsync(e.FullPath);
+                }
+                break;
+            case WatcherChangeTypes.Deleted:
+                _trackedDirectories.TryRemove(e.FullPath, out _);
+                await DisableAsync(e.FullPath);
+                break;
+            case WatcherChangeTypes.Renamed:
+                if (e.OldFullPath != null)
+                {
+                    _trackedDirectories.TryRemove(e.OldFullPath, out _);
+                    await DisableAsync(e.OldFullPath);
+                }
+                if (IsInTrackedDirectory(e.FullPath))
+                {
+                    await EnableAsync(e.FullPath);
+                }
+                break;
+        }
+    }
+
+    private async Task HandleFileEventInternalAsync(FileSystemEvent e, CancellationToken cancellationToken)
+    {
+        if (await ShouldTrackFileAsync(e.FullPath) || IsInTrackedDirectory(e.FullPath))
+        {
+            await _fileEventDebouncer.DebounceAsync(e.FullPath, e);
+        }
+    }
+
+    private bool IsInTrackedDirectory(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        while (!string.IsNullOrEmpty(directory))
+        {
+            if (_trackedDirectories.ContainsKey(directory))
+            {
+                return true;
+            }
+            directory = Path.GetDirectoryName(directory);
+        }
+        return false;
+    }
+
+    private async Task ProcessFileEventAsync(FileSystemEvent e)
+    {
+        try
+        {
+            switch (e.ChangeType)
+            {
+                case WatcherChangeTypes.Created:
+                case WatcherChangeTypes.Changed:
+                    if (await HasFileChangedAsync(e.FullPath))
+                    {
+                        var diff = await TrackAndGetDiffAsync(e.FullPath);
+                        if (diff != null && (diff.IsChanged || diff.IsInitial))
+                        {
+                            _fileContentChangedHandler.Invoke(this, new FileContentChangedEventArgs(e, diff));
+                        }
+                    }
+                    break;
+                case WatcherChangeTypes.Deleted:
+                    RemoveTrackedFile(e.FullPath);
+                    break;
+                case WatcherChangeTypes.Renamed:
+                    if (e.OldFullPath != null)
+                    {
+                        RemoveTrackedFile(e.OldFullPath);
+                    }
+                    if (await ShouldTrackFileAsync(e.FullPath) || IsInTrackedDirectory(e.FullPath))
+                    {
+                        await ProcessFileEventAsync(new FileSystemEvent(WatcherChangeTypes.Created, e.FullPath));
+                    }
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error processing file event for {e.FullPath}: {ex.Message}");
+        }
+    }
+
+    private async Task TrackSingleFileAsync(string filePath)
+    {
+        if (await ShouldTrackFileAsync(filePath))
+        {
+            var trackingFile = GetOrNewTrackingFile(filePath);
+            await TrackFileAsync(filePath, trackingFile.GetBackupFileName());
         }
     }
 
@@ -317,26 +448,54 @@ public class TrackingManager : IDisposable
             return Task.Run(async () =>
             {
                 await DisableTrackingForDirectoryAsync(path);
-                _trackingStore.RemoveTrackingFile(path);
+                await RemoveTrackedFileAndBackupAsync(path);
                 return true;
             });
         }
         else if (_trackingStore.IsTrackingFile(path))
         {
-            RemoveTrackedFile(path);
-            return Task.FromResult(true);
+            return RemoveTrackedFileAndBackupAsync(path);
         }
         return Task.FromResult(false);
     }
 
-    private Task DisableTrackingForDirectoryAsync(string path)
+    private async Task DisableTrackingForDirectoryAsync(string path)
     {
         var trackedFiles = _trackingStore.GetTrackedFilesInDirectory(path);
         foreach (var file in trackedFiles)
         {
-            RemoveTrackedFile(file);
+            await RemoveTrackedFileAndBackupAsync(file);
         }
-        return Task.CompletedTask;
+    }
+
+    private async Task<bool> RemoveTrackedFileAndBackupAsync(string filePath)
+    {
+        if (_trackingStore.TryGetTrackingFile(filePath, out var trackingFile))
+        {
+            var backupPath = GetBackupPath(trackingFile!.GetBackupFileName());
+
+            try
+            {
+                if (File.Exists(backupPath))
+                {
+                    await FileSafe.DeleteRetryAsync(backupPath);
+                }
+
+                _trackingStore.RemoveTrackingFile(filePath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error removing tracked file and backup: {filePath}. Error: {ex.Message}");
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private void RemoveTrackedFile(string filePath)
+    {
+        Task.Run(() => RemoveTrackedFileAndBackupAsync(filePath)).Forget();
     }
 
     private async Task<List<string>> GetTrackedFilesAsync(string path)
@@ -370,37 +529,12 @@ public class TrackingManager : IDisposable
         return trackedFiles;
     }
 
-    internal async Task SyncTrackingFilesAsync(CancellationToken cancellationToken)
-    {
-        var allTrackingFiles = _trackingStore.GetAllTrackingFiles();
-        foreach (var trackingFile in allTrackingFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await SyncTrackingFileAsync(trackingFile, cancellationToken);
-        }
-    }
-
-    private async Task SyncTrackingFileAsync(TrackingFile trackingFile, CancellationToken cancellationToken)
-    {
-        var filePath = trackingFile.FullPath;
-        var backupPath = GetBackupPath(trackingFile.BackupFileName);
-
-        if (!File.Exists(filePath) && !Directory.Exists(filePath))
-        {
-            // 실제 파일/디렉토리가 없는 경우
-            RemoveTrackedFile(filePath);
-        }
-        else if (!File.Exists(backupPath) && File.Exists(filePath))
-        {
-            // 백업 파일이 없지만 실제 파일이 존재하는 경우
-            await TrackFileAsync(filePath, trackingFile.BackupFileName);
-        }
-    }
-
     public bool IsTrackedFile(string filePath)
     {
         return _trackingStore.IsTrackingFile(filePath);
     }
+
+    private bool _disposed = false;
 
     public void Dispose()
     {

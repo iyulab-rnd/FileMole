@@ -190,6 +190,48 @@ public class LocalStorageProvider : IStorageProvider
         }
     }
 
+    public async Task RenameAsync(string fullPath, string newFileName)
+    {
+        await Task.Run(() =>
+        {
+            if (File.Exists(fullPath))
+            {
+                string directory = Path.GetDirectoryName(fullPath)!;
+                string newPath = Path.Combine(directory, newFileName);
+                File.Move(fullPath, newPath);
+            }
+            else if (Directory.Exists(fullPath))
+            {
+                string parentDirectory = Path.GetDirectoryName(fullPath)!;
+                string newPath = Path.Combine(parentDirectory, newFileName);
+                Directory.Move(fullPath, newPath);
+            }
+            else
+            {
+                throw new FileNotFoundException($"Path not found: {fullPath}");
+            }
+        });
+    }
+
+    public async Task DeleteAsync(string fullPath)
+    {
+        await Task.Run(() =>
+        {
+            if (File.Exists(fullPath))
+            {
+                File.Delete(fullPath);
+            }
+            else if (Directory.Exists(fullPath))
+            {
+                Directory.Delete(fullPath, true);
+            }
+            else
+            {
+                throw new FileNotFoundException($"Path not found: {fullPath}");
+            }
+        });
+    }
+
     public void Dispose()
     {
         GC.SuppressFinalize(this);

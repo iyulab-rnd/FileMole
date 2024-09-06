@@ -109,7 +109,13 @@ public class FileMole : IDisposable, IAsyncDisposable
     private async Task HandleFileEventAsync(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
     {
         raiseEvent(e);
-        await Tracking.HandleFileEventAsync(e, _cts.Token);
+        try
+        {
+            await Tracking.HandleFileEventAsync(e, _cts.Token);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private void RaiseDirectoryCreatedEvent(FileSystemEvent internalEvent)
@@ -291,6 +297,48 @@ public class FileMole : IDisposable, IAsyncDisposable
             .OrderByDescending(kvp => kvp.Key.Length)
             .Select(kvp => kvp.Value)
             .FirstOrDefault();
+    }
+
+    public Task MoveAsync(string fullPath, string destinationPath)
+    {
+        var fromStorage = GetProviderForPath(fullPath);
+        var toStorage = GetProviderForPath(destinationPath);
+
+        if (fromStorage == toStorage)
+        {
+            return fromStorage!.MoveAsync(fullPath, destinationPath);
+        }
+        else
+        {
+            throw new NotImplementedException("Moving files between different storage providers is not supported.");
+        }
+    }
+
+    public Task CopyAsync(string fullPath, string destinationPath)
+    {
+        var fromStorage = GetProviderForPath(fullPath);
+        var toStorage = GetProviderForPath(destinationPath);
+
+        if (fromStorage == toStorage)
+        {
+            return fromStorage!.CopyAsync(fullPath, destinationPath);
+        }
+        else
+        {
+            throw new NotImplementedException("Copying files between different storage providers is not supported.");
+        }
+    }
+
+    public Task RenameAsync(string fullPath, string newFileName)
+    {
+        var provider = GetProviderForPath(fullPath);
+        return provider!.RenameAsync(fullPath, newFileName);
+    }
+
+    public Task DeleteAsync(string fullPath)
+    {
+        var provider = GetProviderForPath(fullPath);
+        return provider!.DeleteAsync(fullPath);
     }
 
     #region Dispose
