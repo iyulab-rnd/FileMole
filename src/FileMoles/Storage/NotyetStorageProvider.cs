@@ -1,5 +1,4 @@
 ﻿
-
 namespace FileMoles.Storage;
 
 internal class NotyetStorageProvider : IStorageProvider
@@ -39,7 +38,7 @@ internal class NotyetStorageProvider : IStorageProvider
         throw new NotImplementedException();
     }
 
-    public Task<IEnumerable<DirectoryInfo>> GetDirectoriesAsync(string path)
+    public IAsyncEnumerable<DirectoryInfo> GetDirectoriesAsync(string path)
     {
         throw new NotImplementedException();
     }
@@ -49,7 +48,7 @@ internal class NotyetStorageProvider : IStorageProvider
         throw new NotImplementedException();
     }
 
-    public Task<IEnumerable<FileInfo>> GetFilesAsync(string path)
+    public IAsyncEnumerable<FileInfo> GetFilesAsync(string path)
     {
         throw new NotImplementedException();
     }

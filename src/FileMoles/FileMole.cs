@@ -2,6 +2,7 @@
 using FileMoles.Events;
 using FileMoles.Indexing;
 using FileMoles.Internals;
+using System.Collections.Concurrent;
 
 namespace FileMoles;
 
@@ -77,28 +78,76 @@ public class FileMole : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task InitializeAsync(CancellationToken cancellationToken)
+    private Task InitializeAsync(CancellationToken cancellationToken)
     {
-        try
+        return Task.Run(async () =>
         {
             await Tracking.InitializeAsync(cancellationToken);
             await InitialScanAsync(cancellationToken);
             IsInitialScanComplete = true;
             InitialScanCompleted?.Invoke(this, EventArgs.Empty);
-        }
-        catch (OperationCanceledException)
-        {
-            // 작업이 취소되면 아무것도 하지 않음
-        }
+        }, cancellationToken);
     }
 
     private async Task InitialScanAsync(CancellationToken cancellationToken)
     {
-        foreach (var mole in _options.Moles)
-        {
-            await ScanDirectoryAsync(mole.Path, cancellationToken);
-        }
+        var scanTasks = _options.Moles.Select(mole => ScanDirectoryAsync(mole.Path, cancellationToken));
+        await Task.WhenAll(scanTasks);
         await Tracking.SyncTrackingFilesAsync(cancellationToken);
+    }
+
+    private async Task ScanDirectoryAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var storageProvider = GetStorageProviderForPath(path)
+                ?? throw new ArgumentException($"No storage provider found for path: {path}");
+
+            var batchSize = 100; // Adjust this value based on your system's capabilities
+            var fileQueue = new ConcurrentQueue<FileInfo>();
+            var indexingTasks = new List<Task>();
+
+            async Task ProcessFileQueueAsync()
+            {
+                while (fileQueue.TryDequeue(out var file))
+                {
+                    await _fileIndexer.IndexFileAsync(file, cancellationToken);
+                }
+            }
+
+            await foreach (var file in storageProvider.GetFilesAsync(path).WithCancellation(cancellationToken))
+            {
+                if (FileMoleUtils.IsHidden(file.FullName)) continue;
+
+                fileQueue.Enqueue(file);
+
+                if (fileQueue.Count >= batchSize)
+                {
+                    indexingTasks.Add(ProcessFileQueueAsync());
+                }
+            }
+
+            indexingTasks.Add(ProcessFileQueueAsync()); // Process any remaining files
+
+            await Task.WhenAll(indexingTasks);
+
+            await foreach (var directory in storageProvider.GetDirectoriesAsync(path).WithCancellation(cancellationToken))
+            {
+                if (FileMoleUtils.IsHidden(directory.FullName)) continue;
+
+                await ScanDirectoryAsync(directory.FullName, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLine($"Error scanning directory {path}: {ex.Message}");
+        }
     }
 
     private void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
@@ -173,7 +222,7 @@ public class FileMole : IDisposable, IAsyncDisposable
 
     public async Task<FileInfo> GetFileAsync(string filePath)
     {
-        var provider = GetProviderForPath(filePath);
+        var provider = GetStorageProviderForPath(filePath);
         if (provider != null)
         {
             return await provider.GetFileAsync(filePath);
@@ -184,12 +233,12 @@ public class FileMole : IDisposable, IAsyncDisposable
         }
     }
 
-    public async Task<IEnumerable<FileInfo>> GetFilesAsync(string path)
+    public IAsyncEnumerable<FileInfo> GetFilesAsync(string path)
     {
-        var provider = GetProviderForPath(path);
+        var provider = GetStorageProviderForPath(path);
         if (provider != null)
         {
-            return await provider.GetFilesAsync(path);
+            return provider.GetFilesAsync(path);
         }
         else
         {
@@ -197,22 +246,22 @@ public class FileMole : IDisposable, IAsyncDisposable
         }
     }
 
-    public async Task<IEnumerable<FileInfo>> SearchFilesAsync(string searchTerm)
+    public IAsyncEnumerable<DirectoryInfo> GetDirectoriesAsync(string path)
     {
-        return await _fileIndexer.SearchAsync(searchTerm);
-    }
-
-    public async Task<IEnumerable<DirectoryInfo>> GetDirectoriesAsync(string path)
-    {
-        var provider = GetProviderForPath(path);
+        var provider = GetStorageProviderForPath(path);
         if (provider != null)
         {
-            return await provider.GetDirectoriesAsync(path);
+            return provider.GetDirectoriesAsync(path);
         }
         else
         {
             throw new ArgumentException($"No storage provider found for path: {path}");
         }
+    }
+
+    public IAsyncEnumerable<FileInfo> SearchFilesAsync(string searchTerm)
+    {
+        return _fileIndexer.SearchAsync(searchTerm);
     }
 
     public async Task AddMoleAsync(string path, MoleType type = MoleType.Local, string provider = "Default")
@@ -238,8 +287,7 @@ public class FileMole : IDisposable, IAsyncDisposable
     public async Task<long> GetTotalSizeAsync(string path)
     {
         long totalSize = 0;
-        var files = await GetFilesAsync(path);
-        foreach (var file in files)
+        await foreach(var file in GetFilesAsync(path))
         {
             totalSize += file.Length;
         }
@@ -256,41 +304,7 @@ public class FileMole : IDisposable, IAsyncDisposable
         await _fileIndexer.ClearDatabaseAsync();
     }
 
-    private async Task ScanDirectoryAsync(string path, CancellationToken cancellationToken)
-    {
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var files = await _storageProviders[path].GetFilesAsync(path);
-            foreach (var file in files)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (file.Length <= _options.MaxFileSizeBytes)
-                {
-                    await _fileIndexer.IndexFileAsync(file, cancellationToken);
-                }
-            }
-
-            var directories = await _storageProviders[path].GetDirectoriesAsync(path);
-            foreach (var directory in directories)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await ScanDirectoryAsync(directory.FullName, cancellationToken);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // 작업이 취소되면 예외를 다시 던짐
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Logger.WriteLine($"Error scanning directory {path}: {ex.Message}");
-        }
-    }
-
-    private IStorageProvider? GetProviderForPath(string path)
+    private IStorageProvider? GetStorageProviderForPath(string path)
     {
         return _storageProviders
             .Where(kvp => path.StartsWith(kvp.Key, StringComparison.OrdinalIgnoreCase))
@@ -301,8 +315,8 @@ public class FileMole : IDisposable, IAsyncDisposable
 
     public Task MoveAsync(string fullPath, string destinationPath)
     {
-        var fromStorage = GetProviderForPath(fullPath);
-        var toStorage = GetProviderForPath(destinationPath);
+        var fromStorage = GetStorageProviderForPath(fullPath);
+        var toStorage = GetStorageProviderForPath(destinationPath);
 
         if (fromStorage == toStorage)
         {
@@ -316,8 +330,8 @@ public class FileMole : IDisposable, IAsyncDisposable
 
     public Task CopyAsync(string fullPath, string destinationPath)
     {
-        var fromStorage = GetProviderForPath(fullPath);
-        var toStorage = GetProviderForPath(destinationPath);
+        var fromStorage = GetStorageProviderForPath(fullPath);
+        var toStorage = GetStorageProviderForPath(destinationPath);
 
         if (fromStorage == toStorage)
         {
@@ -331,13 +345,13 @@ public class FileMole : IDisposable, IAsyncDisposable
 
     public Task RenameAsync(string fullPath, string newFileName)
     {
-        var provider = GetProviderForPath(fullPath);
+        var provider = GetStorageProviderForPath(fullPath);
         return provider!.RenameAsync(fullPath, newFileName);
     }
 
     public Task DeleteAsync(string fullPath)
     {
-        var provider = GetProviderForPath(fullPath);
+        var provider = GetStorageProviderForPath(fullPath);
         return provider!.DeleteAsync(fullPath);
     }
 

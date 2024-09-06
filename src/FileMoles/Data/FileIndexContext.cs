@@ -1,8 +1,10 @@
-﻿namespace FileMoles.Data;
+﻿using System.Runtime.CompilerServices;
 
-internal class FileIndexContext
+namespace FileMoles.Data;
+
+internal class FileIndexContext(DbContext dbContext)
 {
-    private readonly DbContext _dbContext;
+    private readonly DbContext _dbContext = dbContext;
 
     internal static readonly string CreateTableSql = @"
             CREATE TABLE IF NOT EXISTS FileIndex (
@@ -15,11 +17,6 @@ internal class FileIndexContext
                 Attributes INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_FileIndex_FullPath ON FileIndex(FullPath);";
-
-    public FileIndexContext(DbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
 
     public async Task<bool> AddOrUpdateAsync(FileIndex fileIndex, CancellationToken cancellationToken)
     {
@@ -51,37 +48,31 @@ internal class FileIndexContext
         }
     }
 
-    public async Task<IEnumerable<FileIndex>> SearchAsync(string searchTerm, CancellationToken cancellationToken)
+    public async Task<List<FileIndex>> SearchAsync(
+        string searchTerm,
+        CancellationToken cancellationToken)
     {
-        try
-        {
-            await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-                    SELECT * FROM FileIndex 
-                    WHERE Name LIKE @SearchTerm OR FullPath LIKE @SearchTerm";
-            command.Parameters.AddWithValue("@SearchTerm", $"%{searchTerm}%");
+        await using var connection = await _dbContext.GetOpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+            SELECT * FROM FileIndex 
+            WHERE Name LIKE @SearchTerm OR FullPath LIKE @SearchTerm";
+        command.Parameters.AddWithValue("@SearchTerm", $"%{searchTerm}%");
 
-            var results = new List<FileIndex>();
-            using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+        var list = new List<FileIndex>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var item = new FileIndex(reader.GetString(reader.GetOrdinal("FullPath")))
             {
-                results.Add(new FileIndex(reader.GetString(reader.GetOrdinal("FullPath")))
-                {
-                    Size = reader.GetInt64(reader.GetOrdinal("Size")),
-                    Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
-                    Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
-                    Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
-                });
-            }
-
-            return results;
+                Size = reader.GetInt64(reader.GetOrdinal("Size")),
+                Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
+                Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
+                Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
+            };
+            list.Add(item);
         }
-        catch (Exception ex)
-        {
-            Logger.WriteLine($"Error searching files: {ex.Message}");
-            return [];
-        }
+        return list;
     }
 
     public async Task<FileIndex?> GetAsync(string fullPath, CancellationToken cancellationToken)

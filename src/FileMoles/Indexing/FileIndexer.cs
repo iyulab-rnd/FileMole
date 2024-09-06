@@ -1,5 +1,6 @@
 ﻿using FileMoles.Data;
 using FileMoles.Internals;
+using System.Runtime.CompilerServices;
 
 namespace FileMoles.Indexing;
 
@@ -39,35 +40,43 @@ public class FileIndexer : IDisposable, IAsyncDisposable
         }
     }
 
-    public async Task<IEnumerable<FileInfo>> SearchAsync(string searchTerm, CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<FileInfo> SearchAsync(string searchTerm, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var fileIndexes = await _dbContext.FileIndexies.SearchAsync(searchTerm, cancellationToken);
-        var results = new List<FileInfo>();
-
-        foreach (var fileIndex in fileIndexes)
+        var list = await _dbContext.FileIndexies.SearchAsync(searchTerm, cancellationToken);
+        foreach (var fileIndex in list)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // 비동기 작업을 수행하고 완료를 기다리지 않습니다.
+            _ = RefreshFileIndexAsync(fileIndex);
+
             var file = new FileInfo(fileIndex.FullPath);
             if (file.Exists)
             {
-                file.Refresh();
-
-                if (file.CreationTime != fileIndex.Created ||
-                    file.LastWriteTime != fileIndex.Modified ||
-                    file.Attributes != fileIndex.Attributes ||
-                    file.Length != fileIndex.Size)
-                {
-                    await IndexFileAsync(file, cancellationToken);
-                }
-
-                results.Add(file);
-            }
-            else
-            {
-                await _dbContext.FileIndexies.RemoveAsync(fileIndex.FullPath, cancellationToken);
+                yield return file;
             }
         }
+    }
 
-        return results;
+    private async Task RefreshFileIndexAsync(FileIndex fileIndex)
+    {
+        var file = new FileInfo(fileIndex.FullPath);
+        if (file.Exists)
+        {
+            file.Refresh();
+
+            if (file.CreationTime != fileIndex.Created ||
+                file.LastWriteTime != fileIndex.Modified ||
+                file.Attributes != fileIndex.Attributes ||
+                file.Length != fileIndex.Size)
+            {
+                await IndexFileAsync(file);
+            }
+        }
+        else
+        {
+            await _dbContext.FileIndexies.RemoveAsync(fileIndex.FullPath, CancellationToken.None);
+        }
     }
 
     public async Task<bool> HasFileChangedAsync(FileInfo file, CancellationToken cancellationToken = default)

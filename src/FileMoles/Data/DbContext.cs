@@ -1,5 +1,4 @@
 ﻿using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Data.Common;
 
@@ -10,6 +9,8 @@ internal class DbContext : IDisposable, IAsyncDisposable
     private readonly SqliteConnection _connection;
     private readonly SemaphoreSlim _transactionSemaphore = new(1, 1);
     private readonly ConcurrentDictionary<int, DbTransaction> _transactions = new();
+    private bool _disposed = false;
+    private readonly SemaphoreSlim _disposeLock = new(1, 1);
 
     public DbContext(string dbPath)
     {
@@ -40,7 +41,7 @@ internal class DbContext : IDisposable, IAsyncDisposable
             command.ExecuteNonQuery();
         }
         catch (Exception ex)
-        {   
+        {
             Logger.WriteLine($"Error initializing database: {ex.Message}");
             throw;
         }
@@ -48,9 +49,18 @@ internal class DbContext : IDisposable, IAsyncDisposable
 
     internal async Task<SqliteConnection> GetOpenConnectionAsync(CancellationToken cancellationToken)
     {
-        if (_connection.State != System.Data.ConnectionState.Open)
+        // Ensure the connection is properly opened
+        if (_connection.State == System.Data.ConnectionState.Closed)
         {
-            await _connection.OpenAsync(cancellationToken);
+            try
+            {
+                await _connection.OpenAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLine($"Error opening database connection: {ex.Message}");
+                throw;
+            }
         }
         return _connection;
     }
@@ -63,7 +73,7 @@ internal class DbContext : IDisposable, IAsyncDisposable
             await using var connection = await GetOpenConnectionAsync(cancellationToken);
             var threadId = Environment.CurrentManagedThreadId;
 
-            if (!_transactions.TryGetValue(threadId, out DbTransaction transaction))
+            if (!_transactions.TryGetValue(threadId, out var transaction))
             {
                 transaction = await connection.BeginTransactionAsync(cancellationToken);
                 _transactions[threadId] = transaction;
@@ -101,7 +111,7 @@ internal class DbContext : IDisposable, IAsyncDisposable
             await using var connection = await GetOpenConnectionAsync(cancellationToken);
             var threadId = Environment.CurrentManagedThreadId;
 
-            if (!_transactions.TryGetValue(threadId, out DbTransaction transaction))
+            if (!_transactions.TryGetValue(threadId, out var transaction))
             {
                 transaction = await connection.BeginTransactionAsync(cancellationToken);
                 _transactions[threadId] = transaction;
@@ -134,9 +144,6 @@ internal class DbContext : IDisposable, IAsyncDisposable
     }
 
     #region Dispose
-
-    private bool _disposed = false;
-    private readonly SemaphoreSlim _disposeLock = new(1, 1);
 
     public void Dispose()
     {

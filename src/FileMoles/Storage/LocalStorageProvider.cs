@@ -10,60 +10,22 @@ public class LocalStorageProvider : IStorageProvider
         return Task.Run(() => new FileInfo(filePath));
     }
 
-    public async Task<IEnumerable<FileInfo>> GetFilesAsync(string path)
+    public async IAsyncEnumerable<FileInfo> GetFilesAsync(string path)
     {
-        return await Task.Run(() =>
+        var directoryInfo = new DirectoryInfo(path);
+        await foreach (var file in new AsyncFileEnumerable(directoryInfo))
         {
-            var files = new List<FileInfo>();
-            var directoryInfo = new DirectoryInfo(path);
-
-            try
-            {
-                files.AddRange(directoryInfo.EnumerateFiles());
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                Logger.WriteLine($"Access denied to directory: {path}. Error: {ex.Message}");
-            }
-            catch (SecurityException ex)
-            {
-                Logger.WriteLine($"Security error accessing directory {path}. Error: {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                Logger.WriteLine($"Error accessing directory {path}. Error: {ex.Message}");
-            }
-
-            return files;
-        });
+            yield return file;
+        }
     }
 
-    public async Task<IEnumerable<DirectoryInfo>> GetDirectoriesAsync(string path)
+    public async IAsyncEnumerable<DirectoryInfo> GetDirectoriesAsync(string path)
     {
-        return await Task.Run(() =>
+        var directoryInfo = new DirectoryInfo(path);
+        await foreach (var directory in new AsyncDirectoryEnumerable(directoryInfo))
         {
-            var directories = new List<DirectoryInfo>();
-            var directoryInfo = new DirectoryInfo(path);
-
-            try
-            {
-                directories.AddRange(directoryInfo.EnumerateDirectories());
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                Logger.WriteLine($"Access denied to directory: {path}. Error: {ex.Message}");
-            }
-            catch (SecurityException ex)
-            {
-                Logger.WriteLine($"Security error accessing directory {path}. Error: {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                Logger.WriteLine($"Error accessing directory {path}. Error: {ex.Message}");
-            }
-
-            return directories;
-        });
+            yield return directory;
+        }
     }
 
     public static async Task<bool> HasAccessAsync(string path)
@@ -236,4 +198,104 @@ public class LocalStorageProvider : IStorageProvider
     {
         GC.SuppressFinalize(this);
     }
+
+    #region private classes
+
+    private class AsyncFileEnumerable(DirectoryInfo directoryInfo) : IAsyncEnumerable<FileInfo>
+    {
+        private readonly DirectoryInfo _directoryInfo = directoryInfo;
+
+        public IAsyncEnumerator<FileInfo> GetAsyncEnumerator(CancellationToken cancellationToken = default)
+        {
+            return new AsyncFileEnumerator(_directoryInfo);
+        }
+    }
+
+    private class AsyncFileEnumerator(DirectoryInfo directoryInfo) : IAsyncEnumerator<FileInfo>
+    {
+        private readonly DirectoryInfo _directoryInfo = directoryInfo;
+        private IEnumerator<FileInfo>? _enumerator;
+
+        public FileInfo Current => _enumerator?.Current!;
+
+        public ValueTask<bool> MoveNextAsync()
+        {
+            try
+            {
+                _enumerator ??= _directoryInfo.EnumerateFiles().GetEnumerator();
+
+                return new ValueTask<bool>(_enumerator.MoveNext());
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Logger.WriteLine($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
+            }
+            catch (SecurityException ex)
+            {
+                Logger.WriteLine($"Security error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLine($"Error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
+            }
+
+            return new ValueTask<bool>(false);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            _enumerator?.Dispose();
+            return new ValueTask();
+        }
+    }
+
+    private class AsyncDirectoryEnumerable(DirectoryInfo directoryInfo) : IAsyncEnumerable<DirectoryInfo>
+    {
+        private readonly DirectoryInfo _directoryInfo = directoryInfo;
+
+        public IAsyncEnumerator<DirectoryInfo> GetAsyncEnumerator(CancellationToken cancellationToken = default)
+        {
+            return new AsyncDirectoryEnumerator(_directoryInfo);
+        }
+    }
+
+    private class AsyncDirectoryEnumerator(DirectoryInfo directoryInfo) : IAsyncEnumerator<DirectoryInfo>
+    {
+        private readonly DirectoryInfo _directoryInfo = directoryInfo;
+        private IEnumerator<DirectoryInfo>? _enumerator;
+
+        public DirectoryInfo Current => _enumerator?.Current!;
+
+        public ValueTask<bool> MoveNextAsync()
+        {
+            try
+            {
+                _enumerator ??= _directoryInfo.EnumerateDirectories().GetEnumerator();
+
+                return new ValueTask<bool>(_enumerator.MoveNext());
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Logger.WriteLine($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
+            }
+            catch (SecurityException ex)
+            {
+                Logger.WriteLine($"Security error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLine($"Error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
+            }
+
+            return new ValueTask<bool>(false);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            _enumerator?.Dispose();
+            return new ValueTask();
+        }
+    }
+
+    #endregion
 }

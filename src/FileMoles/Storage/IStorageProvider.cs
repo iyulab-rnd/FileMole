@@ -1,12 +1,10 @@
-﻿using System.IO;
-
-namespace FileMoles.Storage;
+﻿namespace FileMoles.Storage;
 
 public interface IStorageProvider : IDisposable
 {
     Task<FileInfo> GetFileAsync(string filePath);
-    Task<IEnumerable<FileInfo>> GetFilesAsync(string path);
-    Task<IEnumerable<DirectoryInfo>> GetDirectoriesAsync(string path);
+    IAsyncEnumerable<FileInfo> GetFilesAsync(string path);
+    IAsyncEnumerable<DirectoryInfo> GetDirectoriesAsync(string path);
     Task<Stream> OpenFileAsync(string path, FileMode mode);
     Task CreateDirectoryAsync(string path);
     Task DeleteFileAsync(string path);
