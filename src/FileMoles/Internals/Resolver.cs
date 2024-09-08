@@ -1,5 +1,5 @@
 ﻿using FileMoles.Data;
-using System.Runtime.CompilerServices;
+using FileMoles.Utils;
 
 namespace FileMoles.Internals;
 
@@ -11,7 +11,7 @@ internal static class Resolver
     {
         if (Directory.Exists(Path.GetDirectoryName(dbPath)) is false)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+            IOHelper.CreateDirectory(Path.GetDirectoryName(dbPath)!);
         }
         var dbContext =  new DbContext(dbPath);
         DbContext = dbContext;

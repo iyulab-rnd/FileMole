@@ -1,4 +1,5 @@
 ﻿using FileMoles.Storage;
+using System.Collections.Generic;
 
 namespace FileMoles.Tests.Storage;
 
@@ -30,10 +31,14 @@ public class LocalStorageProviderTests : IDisposable
         File.WriteAllText(file2, "Test content");
 
         // Act
-        var files = await _provider.GetFilesAsync(_testDirectory);
+        var files = new List<FileInfo>();
+        await foreach (var file in _provider.GetFilesAsync(_testDirectory))
+        {
+            files.Add(file);
+        }
 
         // Assert
-        Assert.Equal(2, files.Count());
+        Assert.Equal(2, files.Count);
         Assert.Contains(files, f => f.Name == "file1.txt");
         Assert.Contains(files, f => f.Name == "file2.txt");
     }
@@ -48,10 +53,14 @@ public class LocalStorageProviderTests : IDisposable
         Directory.CreateDirectory(dir2);
 
         // Act
-        var directories = await _provider.GetDirectoriesAsync(_testDirectory);
+        var directories = new List<DirectoryInfo>();
+        await foreach (var directory in _provider.GetDirectoriesAsync(_testDirectory))
+        {
+            directories.Add(directory);
+        }
 
         // Assert
-        Assert.Equal(2, directories.Count());
+        Assert.Equal(2, directories.Count);
         Assert.Contains(directories, d => d.Name == "dir1");
         Assert.Contains(directories, d => d.Name == "dir2");
     }

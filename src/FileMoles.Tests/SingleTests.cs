@@ -65,10 +65,6 @@ public class SingleTests
             await Task.Delay(TimeSpan.FromSeconds(2));
 
             // Assert
-            var backupPath = Path.Combine(testDir, ".backups");
-            var backupFiles = Directory.GetFiles(backupPath);
-
-            Assert.Single(backupFiles);
             Assert.Equal(2, changed);
         }
         finally

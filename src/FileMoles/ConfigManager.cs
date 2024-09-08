@@ -64,7 +64,7 @@ public class ConfigManager
         _configPath = configPath;
         _ignoreConfigPath = Path.Combine(_configPath, Constants.TrackingIgnoreFileName);
         _includeConfigPath = Path.Combine(_configPath, Constants.TrackingIncludeFileName);
-        Directory.CreateDirectory(_configPath);
+        IOHelper.CreateDirectory(_configPath);
         LoadPatterns();
     }
 
@@ -83,7 +83,7 @@ public class ConfigManager
     public bool ShouldTrackFile(string filePath)
     {
         // 숨김 파일 체크
-        if (FileMoleUtils.IsHidden(filePath))
+        if (IOHelper.IsHidden(filePath))
         {
             return false;
         }

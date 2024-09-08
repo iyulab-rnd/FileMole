@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using FileMoles.Utils;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace FileMoles;
@@ -220,7 +221,7 @@ public static class FileSafe
         DirectoryInfo[] dirs = dir.GetDirectories();
 
         // 대상 디렉토리가 없으면 생성
-        Directory.CreateDirectory(destDir);
+        IOHelper.CreateDirectory(destDir);
 
         // 파일 복사
         foreach (FileInfo file in dir.GetFiles())

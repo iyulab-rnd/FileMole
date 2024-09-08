@@ -60,7 +60,12 @@ public class FileIndexerTests : IAsyncLifetime
 
         await _indexer.IndexFileAsync(file);
 
-        var result = await _indexer.SearchAsync("file1.txt");
+        var result = new List<FileInfo>();
+        await foreach (var item in _indexer.SearchAsync("file1.txt"))
+        {
+            result.Add(item);
+        }
+
         Assert.Single(result);
         Assert.Equal(file.Name, result.First().Name);
     }
@@ -73,12 +78,21 @@ public class FileIndexerTests : IAsyncLifetime
         await _indexer.IndexFileAsync(file1);
         await _indexer.IndexFileAsync(file2);
 
-        var result1 = await _indexer.SearchAsync("file1");
-        var result2 = await _indexer.SearchAsync("txt");
+        var result1 = new List<FileInfo>();
+        await foreach (var item in _indexer.SearchAsync("file1"))
+        {
+            result1.Add(item);
+        }
+
+        var result2 = new List<FileInfo>();
+        await foreach (var item in _indexer.SearchAsync("txt"))
+        {
+            result2.Add(item);
+        }
 
         Assert.Single(result1);
         Assert.Equal(file1.Name, result1.First().Name);
-        Assert.Equal(2, result2.Count());
+        Assert.Equal(2, result2.Count);
         Assert.Contains(result2, f => f.Name == file1.Name);
         Assert.Contains(result2, f => f.Name == file2.Name);
     }
@@ -111,7 +125,11 @@ public class FileIndexerTests : IAsyncLifetime
 
         await _indexer.RemoveFileAsync(file.FullName);
 
-        var result = await _indexer.SearchAsync("file1.txt");
+        var result = new List<FileInfo>();
+        await foreach (var item in _indexer.SearchAsync("file1.txt"))
+        {
+            result.Add(item);
+        }
         Assert.Empty(result);
     }
 
@@ -149,7 +167,11 @@ public class FileIndexerTests : IAsyncLifetime
 
         await _indexer.ClearDatabaseAsync();
 
-        var result = await _indexer.SearchAsync("file");
+        var result = new List<FileInfo>();
+        await foreach (var item in _indexer.SearchAsync("file"))
+        {
+            result.Add(item);
+        }
         Assert.Empty(result);
     }
 }

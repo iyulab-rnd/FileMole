@@ -1,5 +1,6 @@
 ﻿using System.Security;
 using System.IO;
+using FileMoles.Utils;
 
 namespace FileMoles.Storage;
 
@@ -78,7 +79,7 @@ public class LocalStorageProvider : IStorageProvider
 
     public async Task CreateDirectoryAsync(string path)
     {
-        await Task.Run(() => Directory.CreateDirectory(path));
+        await Task.Run(() => IOHelper.CreateDirectory(path));
     }
 
     public async Task DeleteFileAsync(string path)
@@ -137,7 +138,7 @@ public class LocalStorageProvider : IStorageProvider
     private void CopyDirectory(string sourcePath, string destinationPath)
     {
         if (!Directory.Exists(destinationPath))
-            Directory.CreateDirectory(destinationPath);
+            IOHelper.CreateDirectory(destinationPath);
 
         foreach (string file in Directory.GetFiles(sourcePath))
         {

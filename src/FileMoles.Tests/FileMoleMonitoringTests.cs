@@ -104,7 +104,11 @@ public class FileMoleMonitoringTests
             await Task.Delay(1000);
 
             // Act
-            var results = await fileMole.SearchFilesAsync("searchtest");
+            var results = new List<FileInfo>();
+            await foreach (var item in fileMole.SearchFilesAsync("searchtest"))
+            {
+                results.Add(item);
+            }
 
             // Assert
             Assert.Single(results);

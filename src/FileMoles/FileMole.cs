@@ -3,6 +3,7 @@ using FileMoles.Events;
 using FileMoles.Indexing;
 using FileMoles.Internals;
 using System.Collections.Concurrent;
+using FileMoles.Utils;
 
 namespace FileMoles;
 
@@ -119,7 +120,7 @@ public class FileMole : IDisposable, IAsyncDisposable
 
             await foreach (var file in storageProvider.GetFilesAsync(path).WithCancellation(cancellationToken))
             {
-                if (FileMoleUtils.IsHidden(file.FullName)) continue;
+                if (IOHelper.IsHidden(file.FullName)) continue;
 
                 fileQueue.Enqueue(file);
 
@@ -135,7 +136,7 @@ public class FileMole : IDisposable, IAsyncDisposable
 
             await foreach (var directory in storageProvider.GetDirectoriesAsync(path).WithCancellation(cancellationToken))
             {
-                if (FileMoleUtils.IsHidden(directory.FullName)) continue;
+                if (IOHelper.IsHidden(directory.FullName)) continue;
 
                 await ScanDirectoryAsync(directory.FullName, cancellationToken);
             }

@@ -1,5 +1,6 @@
 ﻿using FileMoles.Data;
 using FileMoles.Internals;
+using FileMoles.Utils;
 using System.Runtime.CompilerServices;
 
 namespace FileMoles.Indexing;
@@ -16,7 +17,7 @@ public class FileIndexer : IDisposable, IAsyncDisposable
 
     public async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
-        if (FileMoleUtils.IsHidden(file.FullName))
+        if (IOHelper.IsHidden(file.FullName))
         {
             return false;
         }
