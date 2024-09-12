@@ -1,5 +1,5 @@
 ﻿using Moq;
-using FileMoles.Storage;
+using FileMoles.Interfaces;
 
 namespace FileMoles.Tests
 {

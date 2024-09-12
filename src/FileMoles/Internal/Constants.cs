@@ -1,4 +1,4 @@
-﻿namespace FileMoles.Internals;
+﻿namespace FileMoles.Internal;
 
 internal static class Constants
 {

@@ -1,5 +1,5 @@
 ﻿namespace FileMoles.Storage;
 
-internal class RemoteStorageProvider : NotyetStorageProvider
+internal class RemoteStorageProvider : NotImplementedStorageProvider
 {
 }

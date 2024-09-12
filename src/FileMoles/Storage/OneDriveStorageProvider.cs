@@ -1,5 +1,5 @@
 ﻿namespace FileMoles.Storage;
 
-internal class OneDriveStorageProvider : NotyetStorageProvider
+internal class OneDriveStorageProvider : NotImplementedStorageProvider
 {
 }

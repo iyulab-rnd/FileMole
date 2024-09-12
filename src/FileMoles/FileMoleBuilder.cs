@@ -1,4 +1,8 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using FileMoles.Data;
+using FileMoles.Interfaces;
+using FileMoles.Internal;
+using FileMoles.Services;
+using Microsoft.Extensions.Configuration;
 
 namespace FileMoles;
 
@@ -37,7 +41,28 @@ public class FileMoleBuilder
 
     public FileMole Build()
     {
-        var fileMole = new FileMole(_options);
+        var fileMole = new FileMole(_options,
+            ResolveUnitOfWork(),
+            ResolveBackupManager());
         return fileMole;
+    }
+
+    private IUnitOfWork ResolveUnitOfWork()
+    {
+        var dataPath = _options.GetDataPath();
+        var dbPath = Path.Combine(dataPath, Constants.DbFileName);
+
+        if (!Directory.Exists(dataPath))
+        {
+            Directory.CreateDirectory(dataPath);
+        }
+
+        return new DbContext(dbPath);
+    }
+
+
+    private IFileBackupManager ResolveBackupManager()
+    {
+        return new LocalFileBackupManager();
     }
 }

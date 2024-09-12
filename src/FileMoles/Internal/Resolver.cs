@@ -1,7 +1,6 @@
 ﻿using FileMoles.Data;
-using FileMoles.Utils;
 
-namespace FileMoles.Internals;
+namespace FileMoles.Internal;
 
 internal static class Resolver
 {

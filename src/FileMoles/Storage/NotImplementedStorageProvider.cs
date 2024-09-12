@@ -1,7 +1,8 @@
-﻿
+﻿using FileMoles.Interfaces;
+
 namespace FileMoles.Storage;
 
-internal class NotyetStorageProvider : IStorageProvider
+internal class NotImplementedStorageProvider : IStorageProvider
 {
     public Task CopyAsync(string sourcePath, string destinationPath)
     {
@@ -29,6 +30,11 @@ internal class NotyetStorageProvider : IStorageProvider
     }
 
     public void Dispose()
+    {
+        throw new NotImplementedException();
+    }
+
+    public ValueTask DisposeAsync()
     {
         throw new NotImplementedException();
     }

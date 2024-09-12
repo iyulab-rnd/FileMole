@@ -1,6 +1,6 @@
 ﻿using FileMoles.Diff;
 using System.IO;
-using FileMoles.Internals;
+using FileMoles.Internal;
 
 namespace FileMoles.Diff;
 
@@ -8,7 +8,7 @@ public class DiffStrategyFactory
 {
     public static IDiffStrategy CreateStrategy(string filePath)
     {
-        if (FileMoleUtils.IsTextFile(filePath))
+        if (FileMoleHelper.IsTextFile(filePath))
         {
             return new TextDiffStrategy();
         }

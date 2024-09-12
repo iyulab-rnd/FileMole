@@ -29,7 +29,7 @@ public class FileMoleTrackTests : IClassFixture<FileMoleFixture>, IDisposable
             .AddMole(_tempPath)
             .Build();
 
-        _fileMole.Tracking.EnableAsync(_tempPath);
+        _ = _fileMole.Tracking.EnableAsync(_tempPath);
     }
 
     private async Task<string> CreateUniqueFileAsync(string content = "Test content")

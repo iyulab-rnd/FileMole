@@ -1,8 +1,8 @@
 ﻿using System.Security.Cryptography;
 
-namespace FileMoles.Utils;
+namespace FileMoles.Internal;
 
-internal class HashGenerator
+internal class FileHashGenerator
 {
     public async Task<string> GenerateHashAsync(string filePath, CancellationToken cancellationToken = default)
     {
@@ -14,9 +14,9 @@ internal class HashGenerator
             try
             {
                 using var md5 = MD5.Create();
-                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, true);
                 var hash = await md5.ComputeHashAsync(stream, cancellationToken);
-                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                return Convert.ToHexString(hash).ToLowerInvariant();
             }
             catch (IOException) when (attempt < maxRetries - 1)
             {

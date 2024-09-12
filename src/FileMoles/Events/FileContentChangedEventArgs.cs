@@ -5,8 +5,13 @@ public class FileContentChangedEventArgs : FileMoleEventArgs
 {
     public DiffResult Diff { get; }
 
-    public FileContentChangedEventArgs(FileSystemEvent internalEvent, DiffResult diff)
-        : base(internalEvent)
+    public FileContentChangedEventArgs(
+        string fullPath,
+        string? oldFullPath,
+        WatcherChangeTypes changeType,
+        bool isDirectory,
+        DiffResult diff)
+        : base(fullPath, oldFullPath, changeType, isDirectory)
     {
         Diff = diff;
     }

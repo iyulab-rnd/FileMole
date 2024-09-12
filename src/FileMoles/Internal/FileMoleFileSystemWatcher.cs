@@ -2,16 +2,17 @@
 using FileMoles.Indexing;
 using FileMoles.Events;
 
-namespace FileMoles.Internals;
+namespace FileMoles.Internal;
 
-internal class FMFileSystemWatcher : IDisposable
+internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
 {
-    private readonly Dictionary<string, FileSystemWatcher> _watchers = [];
-    private readonly IgnoreManager _ignoreManager;
+    private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new();
+    private readonly FileIgnoreManager _ignoreManager;
     private readonly FileIndexer _fileIndexer;
     private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(400);
     private readonly ConcurrentDictionary<string, DateTime> _lastEventTime = new();
     private readonly ConcurrentDictionary<string, Task> _processingTasks = new();
+    private bool _disposed = false;
 
     internal event EventHandler<FileSystemEvent>? FileCreated;
     internal event EventHandler<FileSystemEvent>? FileChanged;
@@ -23,14 +24,21 @@ internal class FMFileSystemWatcher : IDisposable
     internal event EventHandler<FileSystemEvent>? DirectoryDeleted;
     internal event EventHandler<FileSystemEvent>? DirectoryRenamed;
 
-    public FMFileSystemWatcher(FileMoleOptions options, FileIndexer fileIndexer)
+    public FileMoleFileSystemWatcher(
+        FileIndexer fileIndexer,
+        FileIgnoreManager ignoreManager)
     {
-        _ignoreManager = new IgnoreManager(Path.Combine(options.GetDataPath(), Constants.MonitoringIgnoreFileName));
+        _ignoreManager = ignoreManager;
         _fileIndexer = fileIndexer;
     }
 
     public Task WatchDirectoryAsync(string path)
     {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(FileMoleFileSystemWatcher));
+        }
+
         if (_watchers.ContainsKey(path))
         {
             return Task.CompletedTask;
@@ -66,9 +74,9 @@ internal class FMFileSystemWatcher : IDisposable
                 await ProcessEventAsync(e.FullPath, WatcherChangeTypes.Created);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-
+            Logger.WriteLine($"Error processing created event: {ex.Message}");
         }
     }
 
@@ -105,9 +113,9 @@ internal class FMFileSystemWatcher : IDisposable
                 await ProcessEventAsync(fullPath, WatcherChangeTypes.Changed);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-
+            Logger.WriteLine($"Error processing changed event: {ex.Message}");
         }
 
         _processingTasks.TryRemove(fullPath, out _);
@@ -128,8 +136,9 @@ internal class FMFileSystemWatcher : IDisposable
                 await ProcessEventAsync(e.FullPath, WatcherChangeTypes.Deleted);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.WriteLine($"Error processing deleted event: {ex.Message}");
         }
     }
 
@@ -148,8 +157,9 @@ internal class FMFileSystemWatcher : IDisposable
                 await ProcessEventAsync(e.FullPath, WatcherChangeTypes.Renamed, e.OldFullPath);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.WriteLine($"Error processing renamed event: {ex.Message}");
         }
     }
 
@@ -159,19 +169,24 @@ internal class FMFileSystemWatcher : IDisposable
         {
             if (changeType == WatcherChangeTypes.Deleted)
             {
-                await _fileIndexer.RemoveFileAsync(fullPath);
                 FileDeleted?.Invoke(this, new FileSystemEvent(changeType, fullPath));
+                await _fileIndexer.RemoveFileAsync(fullPath);
                 return;
             }
 
             if (changeType == WatcherChangeTypes.Renamed && oldPath != null)
             {
-                await _fileIndexer.RemoveFileAsync(oldPath);
                 var info = new FileInfo(fullPath);
                 if (info.Exists)
                 {
-                    await _fileIndexer.IndexFileAsync(info);
                     FileRenamed?.Invoke(this, new FileSystemEvent(changeType, fullPath, oldPath));
+
+                    await _fileIndexer.RemoveFileAsync(oldPath);
+                    await _fileIndexer.IndexFileAsync(info);
+                }
+                else
+                {
+                    await _fileIndexer.RemoveFileAsync(oldPath);
                 }
                 return;
             }
@@ -181,7 +196,6 @@ internal class FMFileSystemWatcher : IDisposable
             {
                 if (changeType == WatcherChangeTypes.Created || await _fileIndexer.HasFileChangedAsync(fileInfo))
                 {
-                    await _fileIndexer.IndexFileAsync(fileInfo);
                     if (changeType == WatcherChangeTypes.Created)
                     {
                         FileCreated?.Invoke(this, new FileSystemEvent(changeType, fullPath));
@@ -190,32 +204,121 @@ internal class FMFileSystemWatcher : IDisposable
                     {
                         FileChanged?.Invoke(this, new FileSystemEvent(changeType, fullPath));
                     }
+                    await _fileIndexer.IndexFileAsync(fileInfo);
                 }
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.WriteLine($"Error processing event: {ex.Message}");
         }
     }
 
     public Task UnwatchDirectoryAsync(string path)
     {
-        if (_watchers.TryGetValue(path, out var watcher))
+        if (_disposed)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (_watchers.TryRemove(path, out var watcher))
         {
             watcher.EnableRaisingEvents = false;
+            UnsubscribeEvents(watcher);
             watcher.Dispose();
-            _watchers.Remove(path);
         }
         return Task.CompletedTask;
     }
 
+    private void UnsubscribeEvents(FileSystemWatcher watcher)
+    {
+        watcher.Created -= OnCreated;
+        watcher.Changed -= OnChanged;
+        watcher.Deleted -= OnDeleted;
+        watcher.Renamed -= OnRenamed;
+    }
+
     public void Dispose()
     {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (disposing)
+        {
+            foreach (var watcher in _watchers.Values)
+            {
+                watcher.EnableRaisingEvents = false;
+                UnsubscribeEvents(watcher);
+                watcher.Dispose();
+            }
+            _watchers.Clear();
+
+            // 이벤트 핸들러 해제
+            FileCreated = null;
+            FileChanged = null;
+            FileDeleted = null;
+            FileRenamed = null;
+            DirectoryCreated = null;
+            DirectoryChanged = null;
+            DirectoryDeleted = null;
+            DirectoryRenamed = null;
+        }
+
+        _disposed = true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        await DisposeAsyncCore();
+
+        Dispose(false);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual async ValueTask DisposeAsyncCore()
+    {
+        foreach (var task in _processingTasks.Values)
+        {
+            try
+            {
+                await task;
+            }
+            catch (Exception ex)
+            {
+                // 이미 종료된 태스크나 에러 발생 시 로깅
+                Logger.WriteLine($"Error during task completion: {ex.Message}");
+            }
+        }
+
         foreach (var watcher in _watchers.Values)
         {
+            watcher.EnableRaisingEvents = false;
+            UnsubscribeEvents(watcher);
             watcher.Dispose();
         }
         _watchers.Clear();
-        GC.SuppressFinalize(this);
+
+        // 이벤트 핸들러 해제
+        FileCreated = null;
+        FileChanged = null;
+        FileDeleted = null;
+        FileRenamed = null;
+        DirectoryCreated = null;
+        DirectoryChanged = null;
+        DirectoryDeleted = null;
+        DirectoryRenamed = null;
     }
 }

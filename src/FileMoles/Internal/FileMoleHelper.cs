@@ -1,9 +1,10 @@
-﻿using FileMoles.Storage;
+﻿using FileMoles.Interfaces;
+using FileMoles.Storage;
 using MimeKit;
 
-namespace FileMoles.Internals;
+namespace FileMoles.Internal;
 
-internal static class FileMoleUtils
+internal static class FileMoleHelper
 {
     internal static bool IsTextFile(string filePath)
     {

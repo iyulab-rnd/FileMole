@@ -1,204 +1,211 @@
 ﻿using Microsoft.Data.Sqlite;
-using System.Collections.Concurrent;
-using System.Data.Common;
+using System.Data;
 
 namespace FileMoles.Data;
 
-internal class DbContext : IDisposable, IAsyncDisposable
+internal class DbContext : IUnitOfWork
 {
     private readonly SqliteConnection _connection;
-    private readonly SemaphoreSlim _transactionSemaphore = new(1, 1);
-    private readonly ConcurrentDictionary<int, DbTransaction> _transactions = new();
-    private bool _disposed = false;
-    private readonly SemaphoreSlim _disposeLock = new(1, 1);
+    private SqliteTransaction? _transaction;
+    private bool _disposed;
+    private readonly List<Task> _pendingTasks = [];
+    private readonly CancellationTokenSource _cts = new();
+
+    public FileIndexRepository FileIndices { get; }
+    public TrackingFileRepository TrackingFiles { get; }
 
     public DbContext(string dbPath)
     {
         _connection = new SqliteConnection($"Data Source={dbPath};Mode=ReadWriteCreate;");
-        FileIndexies = new FileIndexContext(this);
-        TrackingFiles = new TrackingFileContext(this);
+        _connection.Open();
+
+        FileIndices = new FileIndexRepository(this);
+        TrackingFiles = new TrackingFileRepository(this);
+
         InitializeDatabase();
-    }
-
-    public FileIndexContext FileIndexies { get; }
-    public TrackingFileContext TrackingFiles { get; }
-
-    private void EnsureConnectionOpen()
-    {
-        if (_connection.State != System.Data.ConnectionState.Open)
-        {
-            _connection.Open();
-        }
     }
 
     private void InitializeDatabase()
     {
-        try
-        {
-            EnsureConnectionOpen();
-            using var command = _connection.CreateCommand();
-            command.CommandText = FileIndexContext.CreateTableSql + TrackingFileContext.CreateTableSql;
-            command.ExecuteNonQuery();
-        }
-        catch (Exception ex)
-        {
-            Logger.WriteLine($"Error initializing database: {ex.Message}");
-            throw;
-        }
+        using var command = _connection.CreateCommand();
+        command.CommandText = $@"
+                {FileIndexRepository.CreateTableSql}
+                {TrackingFileRepository.CreateTableSql}";
+        command.ExecuteNonQuery();
     }
 
-    internal async Task<SqliteConnection> GetOpenConnectionAsync(CancellationToken cancellationToken)
+    public async Task BeginTransactionAsync(CancellationToken cancellationToken = default)
     {
-        // Ensure the connection is properly opened
-        if (_connection.State == System.Data.ConnectionState.Closed)
+        if (_disposed)
         {
-            try
-            {
-                await _connection.OpenAsync(cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                Logger.WriteLine($"Error opening database connection: {ex.Message}");
-                throw;
-            }
+            return;
+        }
+
+        if (_transaction != null)
+        {
+            throw new InvalidOperationException("A transaction is already in progress.");
+        }
+        _transaction = (SqliteTransaction)await _connection.BeginTransactionAsync(cancellationToken);
+    }
+
+    public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (_disposed)
+        {
+            return 0;
+        }
+
+        if (_transaction == null)
+        {
+            throw new InvalidOperationException("No transaction is in progress.");
+        }
+        await _transaction.CommitAsync(cancellationToken);
+        _transaction = null;
+        return 1;
+    }
+
+    public async Task<SqliteConnection> GetConnectionAsync(CancellationToken cancellationToken = default)
+    {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(DbContext));
+        }
+
+        if (_connection.State != ConnectionState.Open)
+        {
+            await _connection.OpenAsync(cancellationToken);
         }
         return _connection;
     }
 
-    internal async Task ExecuteInTransactionAsync(Func<SqliteConnection, CancellationToken, Task> action, CancellationToken cancellationToken)
+    public async Task ExecuteInTransactionAsync(Func<SqliteConnection, CancellationToken, Task> action, CancellationToken cancellationToken = default)
     {
-        await _transactionSemaphore.WaitAsync(cancellationToken);
+        if (_disposed)
+        {
+            return;
+        }
+
+        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
+        var task = InternalExecuteInTransactionAsync(action, linkedCts.Token);
+        _pendingTasks.Add(task);
         try
         {
-            await using var connection = await GetOpenConnectionAsync(cancellationToken);
-            var threadId = Environment.CurrentManagedThreadId;
-
-            if (!_transactions.TryGetValue(threadId, out var transaction))
-            {
-                transaction = await connection.BeginTransactionAsync(cancellationToken);
-                _transactions[threadId] = transaction;
-            }
-
-            try
-            {
-                await action(connection, cancellationToken);
-
-                if (_transactions.TryRemove(threadId, out var removedTransaction))
-                {
-                    await removedTransaction.CommitAsync(cancellationToken);
-                }
-            }
-            catch
-            {
-                if (_transactions.TryRemove(threadId, out var removedTransaction))
-                {
-                    await removedTransaction.RollbackAsync(cancellationToken);
-                }
-                throw;
-            }
+            await task;
         }
         finally
         {
-            _transactionSemaphore.Release();
+            _pendingTasks.Remove(task);
         }
     }
 
-    internal async Task<T> ExecuteInTransactionAsync<T>(Func<SqliteConnection, CancellationToken, Task<T>> action, CancellationToken cancellationToken)
+    private async Task InternalExecuteInTransactionAsync(Func<SqliteConnection, CancellationToken, Task> action, CancellationToken cancellationToken)
     {
-        await _transactionSemaphore.WaitAsync(cancellationToken);
-        try
+        if (_disposed)
         {
-            await using var connection = await GetOpenConnectionAsync(cancellationToken);
-            var threadId = Environment.CurrentManagedThreadId;
+            return;
+        }
 
-            if (!_transactions.TryGetValue(threadId, out var transaction))
-            {
-                transaction = await connection.BeginTransactionAsync(cancellationToken);
-                _transactions[threadId] = transaction;
-            }
-
+        if (_transaction == null)
+        {
+            await BeginTransactionAsync(cancellationToken);
             try
             {
-                var result = await action(connection, cancellationToken);
-
-                if (_transactions.TryRemove(threadId, out var removedTransaction))
-                {
-                    await removedTransaction.CommitAsync(cancellationToken);
-                }
-
-                return result;
+                await action(_connection, cancellationToken);
+                await SaveChangesAsync(cancellationToken);
             }
             catch
             {
-                if (_transactions.TryRemove(threadId, out var removedTransaction))
+                if (_transaction != null)
                 {
-                    await removedTransaction.RollbackAsync(cancellationToken);
+                    await _transaction.RollbackAsync(cancellationToken);
                 }
                 throw;
             }
+            finally
+            {
+                _transaction = null;
+            }
         }
-        finally
+        else
         {
-            _transactionSemaphore.Release();
+            await action(_connection, cancellationToken);
         }
     }
 
-    #region Dispose
-
-    public void Dispose()
+    private async Task WaitForPendingTasksAsync()
     {
-        Dispose(true);
+        try
+        {
+            await Task.WhenAll(_pendingTasks.ToArray());
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteLine($"Error while waiting for pending tasks in DbContext: {ex.Message}");
+        }
+    }
+
+    protected virtual async ValueTask DisposeAsyncCore()
+    {
+        if (!_disposed)
+        {
+            try
+            {
+                _cts.Cancel();
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLine($"Error during cancellation: {ex.Message}");
+            }
+
+            await WaitForPendingTasksAsync();
+
+            if (_transaction != null)
+            {
+                await _transaction.DisposeAsync();
+            }
+            await _connection.CloseAsync();
+            await _connection.DisposeAsync();
+            _cts.Dispose();
+            _disposed = true;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        await DisposeAsyncCore();
+        Dispose(false);
         GC.SuppressFinalize(this);
     }
 
     protected virtual void Dispose(bool disposing)
     {
-        if (_disposed)
-            return;
-
-        if (disposing)
+        if (!_disposed)
         {
-            _disposeLock.Wait();
-            try
+            if (disposing)
             {
-                if (_connection != null)
-                {
-                    _connection.Close();
-                    _connection.Dispose();
-                }
+                _cts.Cancel();
+                WaitForPendingTasksAsync().GetAwaiter().GetResult();
+                _transaction?.Dispose();
+                _connection.Dispose();
+                _cts.Dispose();
             }
-            finally
-            {
-                _disposeLock.Release();
-            }
-        }
-
-        _disposed = true;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        await _disposeLock.WaitAsync();
-        try
-        {
-            if (_disposed)
-                return;
-
-            if (_connection != null)
-            {
-                await _connection.CloseAsync();
-                await _connection.DisposeAsync();
-            }
-
             _disposed = true;
         }
-        finally
-        {
-            _disposeLock.Release();
-        }
-
-        GC.SuppressFinalize(this);
     }
 
-    #endregion
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
 }

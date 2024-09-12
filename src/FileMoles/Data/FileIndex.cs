@@ -1,20 +1,25 @@
 ﻿namespace FileMoles.Data;
 
-public class FileIndex
+internal class FileIndex
 {
-    public string FullPath { get; set; }
-    public long Size { get; init; }
-    public DateTime Created { get; init; }
-    public DateTime Modified { get; init; }
-    public FileAttributes Attributes { get; init; }
+    public int Id { get; set; }
+    public required string FullPath { get; set; }
+    public required string Name { get; set; }
+    public long Size { get; set; }
+    public DateTime Created { get; set; }
+    public DateTime Modified { get; set; }
+    public FileAttributes Attributes { get; set; }
 
-    public string Name => Path.GetFileName(FullPath);
-    public string Directory => Path.GetDirectoryName(FullPath)!;
-
-    public FileIndex(string fullPath)
+    internal static FileIndex CreateNew(FileInfo file)
     {
-        FullPath = fullPath;
+        return new FileIndex()
+        {
+            FullPath = file.FullName,
+            Name = file.Name,
+            Size = file.Length,
+            Created = file.CreationTime,
+            Modified = file.LastWriteTime,
+            Attributes = file.Attributes
+        };
     }
-
-    public FileInfo GetFileInfo() => new(FullPath);
 }

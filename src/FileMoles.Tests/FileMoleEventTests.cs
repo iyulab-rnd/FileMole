@@ -2,7 +2,7 @@
 
 namespace FileMoles.Tests
 {
-    public class FileMoleEventTests : IClassFixture<FileMoleFixture>, IDisposable
+    public class FileMoleEventTests : IClassFixture<FileMoleFixture>
     {
         private readonly string _tempPath;
         private readonly FileMole _fileMole;
@@ -170,12 +170,6 @@ namespace FileMoles.Tests
         private async Task WaitForEventProcessingAsync()
         {
             await Task.Delay(1000);  // Increased delay to allow for potential retries
-        }
-
-        public void Dispose()
-        {
-            _fileMole.Dispose();
-            GC.SuppressFinalize(this);
         }
     }
 }

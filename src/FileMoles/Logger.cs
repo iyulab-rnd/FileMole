@@ -1,17 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Diagnostics;
 
-namespace FileMoles
+namespace FileMoles;
+
+public class Logger
 {
-    public class Logger
+    internal static void WriteLine(string message)
     {
-        internal static void WriteLine(string message)
-        {
-            Debug.WriteLine(message);
-        }
+        Debug.WriteLine(message);
+    }
+    internal static void OnException(Exception ex)
+    {
+        Debug.WriteLine(ex.Message);
     }
 }

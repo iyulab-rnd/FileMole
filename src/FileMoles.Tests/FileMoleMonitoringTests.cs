@@ -26,14 +26,11 @@ public class FileMoleMonitoringTests
 
     private async Task TearDownTestEnvironment(string testDirectory, FileMole fileMole)
     {
-        await fileMole.DisposeAsync();
-
         try
         {
-            if (Directory.Exists(testDirectory))
-            {
-                Directory.Delete(testDirectory, true);
-            }
+            await fileMole.DisposeAsync();
+            await Task.Delay(TimeSpan.FromSeconds(1)); // 정리를 위한 대기 시간 증가
+            await SafeFileIO.DeleteRetryAsync(testDirectory);
         }
         catch (Exception)
         {

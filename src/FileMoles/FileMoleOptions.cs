@@ -7,7 +7,7 @@ public class FileMoleOptions
     /// <summary>
     /// DebounceTime (milliseconds)
     /// </summary>
-    public double DebounceTime { get; set; } = 1000 * 60 * 1; // 1 minute (1000ms * 60s * 1m)
+    public int DebounceTime { get; set; } = 1000 * 60 * 1; // 1 minute (1000ms * 60s * 1m)
     public long MaxFileSizeBytes { get; set; } = 1024 * 1024 * 200; // 200 MB (1KB * 1MB * 200)
 
     public IEnumerable<string> DefaultImports { get; set; } = [];

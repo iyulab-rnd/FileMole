@@ -27,9 +27,15 @@
 
         private async Task TearDownTestEnvironment(string testDirectory, FileMole fileMole)
         {
-            fileMole.Dispose();
-            await Task.Delay(500); // 정리를 위한 대기 시간 증가
-            FileSafe.DeleteRetry(testDirectory);
+            try
+            {
+                await fileMole.DisposeAsync();
+                await Task.Delay(TimeSpan.FromSeconds(1)); // 정리를 위한 대기 시간 증가
+                await SafeFileIO.DeleteRetryAsync(testDirectory);
+            }
+            catch (Exception)
+            {
+            }
         }
 
         [Fact]

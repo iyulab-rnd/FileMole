@@ -1,10 +1,10 @@
 ﻿using System.Security;
-using System.IO;
-using FileMoles.Utils;
+using FileMoles.Interfaces;
+using FileMoles.Internal;
 
 namespace FileMoles.Storage;
 
-public class LocalStorageProvider : IStorageProvider
+internal class LocalStorageProvider : IStorageProvider
 {
     public Task<FileInfo> GetFileAsync(string filePath)
     {
@@ -198,6 +198,12 @@ public class LocalStorageProvider : IStorageProvider
     public void Dispose()
     {
         GC.SuppressFinalize(this);
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        return new ValueTask();
     }
 
     #region private classes

@@ -19,7 +19,7 @@ public class SingleTests
     private async Task<(string directory, FileMole mole)> SetupTestEnvironment()
     {
         var basePath = Path.Combine("c:", "file-mole-tests");
-        await FileSafe.DeleteRetryAsync(basePath);
+        await SafeFileIO.DeleteRetryAsync(basePath);
 
         var testDirectory = Path.Combine("c:", "file-mole-tests", basePath);
         Directory.CreateDirectory(testDirectory);
@@ -33,7 +33,7 @@ public class SingleTests
         await fileMole.DisposeAsync();
         try
         {
-            await FileSafe.DeleteRetryAsync(testDirectory);
+            await SafeFileIO.DeleteRetryAsync(testDirectory);
         }
         catch (Exception)
         {

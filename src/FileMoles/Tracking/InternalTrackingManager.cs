@@ -1,46 +1,45 @@
 ﻿using FileMoles.Data;
 using FileMoles.Diff;
 using FileMoles.Events;
-using FileMoles.Internals;
-using FileMoles.Services;
-using FileMoles.Utils;
+using FileMoles.Interfaces;
+using FileMoles.Internal;
 using System.Collections.Concurrent;
 
-namespace FileMoles;
+namespace FileMoles.Tracking;
 
-public class TrackingManager : IDisposable
+internal class InternalTrackingManager : IDisposable, IAsyncDisposable
 {
-    private readonly string _basePath;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileLocks = new();
-    private readonly ConfigManager _configManager;
-    private readonly Debouncer<FileSystemEvent> _fileEventDebouncer;
+    private readonly TrackingConfigManager _configManager;
+    private readonly EventDebouncer<FileSystemEvent> _fileEventDebouncer;
     private readonly EventHandler<FileContentChangedEventArgs> _fileContentChangedHandler;
-    private readonly HashGenerator _hashGenerator;
-    private readonly InMemoryTrackingStore _trackingStore;
+    private readonly FileHashGenerator _hashGenerator;
+    private readonly InMemoryFileTrackingStore _trackingStore;
     private readonly ConcurrentDictionary<string, bool> _trackedDirectories = new();
-    private readonly IBackupManager _backupManager;
+    private readonly IFileBackupManager _backupManager;
+    private readonly CancellationTokenSource _cts = new();
 
-    public TrackingManager(
-        string basePath,
-        double debounceTime,
-        ConfigManager configManager,
-        EventHandler<FileContentChangedEventArgs> fileContentChangedHandler)
+    public InternalTrackingManager(
+        int debounceTime,
+        TrackingConfigManager configManager,
+        EventHandler<FileContentChangedEventArgs> fileContentChangedHandler,
+        IUnitOfWork unitOfWork,
+        IFileBackupManager backupManager)
     {
-        _basePath = basePath;
         _configManager = configManager;
-        _fileEventDebouncer = new Debouncer<FileSystemEvent>(Convert.ToInt32(debounceTime), OnDebouncedFileEvents);
+        _fileEventDebouncer = new EventDebouncer<FileSystemEvent>(debounceTime, OnDebouncedFileEvents);
         _fileContentChangedHandler = fileContentChangedHandler;
-        _hashGenerator = new HashGenerator();
-        _trackingStore = new InMemoryTrackingStore(Resolver.ResolveDbContext(Path.Combine(basePath, Constants.DbFileName)));
-        _backupManager = new LocalBackupManager();
+        _hashGenerator = new FileHashGenerator();
+        _trackingStore = new InMemoryFileTrackingStore(unitOfWork);
+        _backupManager = backupManager;
     }
 
-    internal async Task InitializeAsync(CancellationToken cancellationToken)
+    public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         await _trackingStore.InitializeAsync(cancellationToken);
     }
 
-    internal async Task SyncTrackingFilesAsync(CancellationToken cancellationToken)
+    public async Task SyncTrackingFilesAsync(CancellationToken cancellationToken)
     {
         var allTrackingFiles = _trackingStore.GetAllTrackingFiles();
         foreach (var trackingFile in allTrackingFiles)
@@ -53,7 +52,7 @@ public class TrackingManager : IDisposable
                     foreach (var file in Directory.GetFiles(trackingFile.FullPath))
                     {
                         if (await ShouldTrackFileAsync(file)
-                            && _trackingStore.TryGetTrackingFile(file, out _) is false)
+                            && !_trackingStore.TryGetTrackingFile(file, out _))
                         {
                             await EnableAsync(file);
                         }
@@ -110,14 +109,14 @@ public class TrackingManager : IDisposable
                 diff = new TextDiffResult
                 {
                     FileType = "Text",
-                    Entries =
-                    [
+                    Entries = new List<TextDiffEntry>
+                    {
                         new TextDiffEntry
                         {
                             Type = DiffType.Inserted,
                             ModifiedText = await File.ReadAllTextAsync(filePath)
                         }
-                    ],
+                    },
                     IsInitial = true
                 };
             }
@@ -178,7 +177,7 @@ public class TrackingManager : IDisposable
 
     private async Task OnDebouncedFileEvents(IEnumerable<FileSystemEvent> events)
     {
-        foreach (var e in events.ToList())
+        foreach (var e in events)
         {
             await ProcessFileEventAsync(e);
         }
@@ -197,34 +196,24 @@ public class TrackingManager : IDisposable
             return true; // No tracking info exists, so it's a new file
         }
 
-        // null 체크 추가
-        if (trackingFile == null)
-        {
-            return true; // Tracking file is null, treat as a new file
-        }
-
-        return await _backupManager.HasFileChangedAsync(filePath);
+        return trackingFile == null || await _backupManager.HasFileChangedAsync(filePath);
     }
 
     private TrackingFile? GetTrackingFile(string filePath)
     {
-        if (_trackingStore.TryGetTrackingFile(filePath, out var trackingFile))
-        {
-            return trackingFile!;
-        }
-        return null;
+        _trackingStore.TryGetTrackingFile(filePath, out var trackingFile);
+        return trackingFile;
     }
 
     private TrackingFile GetOrNewTrackingFile(string filePath)
     {
-        if (GetTrackingFile(filePath) is TrackingFile trackingFile)
+        return GetTrackingFile(filePath) ?? new TrackingFile
         {
-            return trackingFile;
-        }
-        else
-        {
-            return new TrackingFile(filePath, Directory.Exists(filePath));
-        }
+            FullPath = filePath,
+            Hash = TrackingFile.GeneratePathHash(filePath),
+            IsDirectory = Directory.Exists(filePath),
+            LastTrackedTime = DateTime.UtcNow
+        };
     }
 
     private Task<bool> ShouldTrackFileAsync(string filePath)
@@ -234,7 +223,7 @@ public class TrackingManager : IDisposable
             return Task.FromResult(true);
 
         // 추적 폴더내 속한 파일
-        else if (File.Exists(filePath) &&
+        if (File.Exists(filePath) &&
             _trackingStore.IsTrackingFile(Path.GetDirectoryName(filePath)!) &&
             _configManager.ShouldTrackFile(filePath))
         {
@@ -252,21 +241,24 @@ public class TrackingManager : IDisposable
         }
 
         var isDirectory = Directory.Exists(path);
-        var trackingFile = new TrackingFile(path, isDirectory);
+        var trackingFile = new TrackingFile
+        {
+            FullPath = path,
+            Hash = TrackingFile.GeneratePathHash(path),
+            IsDirectory = isDirectory,
+            LastTrackedTime = DateTime.UtcNow
+        };
         _trackingStore.AddOrUpdateTrackingFile(trackingFile);
 
-        await Task.Run(async () =>
+        if (isDirectory)
         {
-            if (isDirectory)
-            {
-                _trackedDirectories[path] = true;
-                await InitializeTrackedFilesAsync(path);
-            }
-            else
-            {
-                await TrackSingleFileAsync(path);
-            }
-        });
+            _trackedDirectories[path] = true;
+            await InitializeTrackedFilesAsync(path);
+        }
+        else
+        {
+            await TrackSingleFileAsync(path);
+        }
 
         return true;
     }
@@ -355,17 +347,19 @@ public class TrackingManager : IDisposable
                         var diff = await TrackAndGetDiffAsync(e.FullPath);
                         if (diff != null && (diff.IsChanged || diff.IsInitial))
                         {
-                            _fileContentChangedHandler.Invoke(this, new FileContentChangedEventArgs(e, diff));
+                            _fileContentChangedHandler.Invoke(
+                                this,
+                                e.CreateFileContentChangedEventArgs(diff));
                         }
                     }
                     break;
                 case WatcherChangeTypes.Deleted:
-                    RemoveTrackedFile(e.FullPath);
+                    await RemoveTrackedFileAsync(e.FullPath);
                     break;
                 case WatcherChangeTypes.Renamed:
                     if (e.OldFullPath != null)
                     {
-                        RemoveTrackedFile(e.OldFullPath);
+                        await RemoveTrackedFileAsync(e.OldFullPath);
                     }
                     if (await ShouldTrackFileAsync(e.FullPath) || IsInTrackedDirectory(e.FullPath))
                     {
@@ -389,22 +383,14 @@ public class TrackingManager : IDisposable
         }
     }
 
-    public Task<bool> DisableAsync(string path)
+    public async Task<bool> DisableAsync(string path)
     {
         if (_trackingStore.IsTrackingFile(path))
         {
-            return Task.Run(async () =>
-            {
-                await DisableTrackingForDirectoryAsync(path);
-                await RemoveTrackedFileAndBackupAsync(path);
-                return true;
-            });
+            await DisableTrackingForDirectoryAsync(path);
+            return await RemoveTrackedFileAndBackupAsync(path);
         }
-        else if (_trackingStore.IsTrackingFile(path))
-        {
-            return RemoveTrackedFileAndBackupAsync(path);
-        }
-        return Task.FromResult(false);
+        return false;
     }
 
     private async Task DisableTrackingForDirectoryAsync(string path)
@@ -423,32 +409,30 @@ public class TrackingManager : IDisposable
 
     private async Task<List<string>> GetTrackedFilesAsync(string path)
     {
-        List<string> trackedFiles = [];
+        List<string> trackedFiles = new();
 
-        await Task.Run(async () =>
+        if (File.Exists(path))
         {
-            if (File.Exists(path))
+            if (await ShouldTrackFileAsync(path))
             {
-                if (await ShouldTrackFileAsync(path))
+                trackedFiles.Add(path);
+            }
+        }
+        else if (Directory.Exists(path))
+        {
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+            {
+                if (await ShouldTrackFileAsync(file))
                 {
-                    trackedFiles.Add(path);
+                    trackedFiles.Add(file);
                 }
             }
-            else if (Directory.Exists(path))
-            {
-                foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-                {
-                    if (await ShouldTrackFileAsync(file))
-                    {
-                        trackedFiles.Add(file);
-                    }
-                }
-            }
-            else
-            {
-                Logger.WriteLine($"Warning: Path does not exist: {path}");
-            }
-        });
+        }
+        else
+        {
+            Logger.WriteLine($"Warning: Path does not exist: {path}");
+        }
+
         return trackedFiles;
     }
 
@@ -457,7 +441,11 @@ public class TrackingManager : IDisposable
         return _trackingStore.IsTrackingFile(filePath);
     }
 
-    private bool _disposed = false;
+    private async Task RemoveTrackedFileAsync(string filePath)
+    {
+        _trackingStore.RemoveTrackingFile(filePath);
+        await _backupManager.DeleteBackupAsync(filePath);
+    }
 
     public void Dispose()
     {
@@ -467,18 +455,33 @@ public class TrackingManager : IDisposable
 
     protected virtual void Dispose(bool disposing)
     {
-        if (!_disposed)
+        if (disposing)
         {
-            if (disposing)
+            _cts.Cancel();
+            _fileEventDebouncer.Dispose();
+            foreach (var semaphore in _fileLocks.Values)
             {
-                _fileEventDebouncer.Dispose();
-                foreach (var semaphore in _fileLocks.Values)
-                {
-                    semaphore.Dispose();
-                }
+                semaphore.Dispose();
             }
-
-            _disposed = true;
+            _cts.Dispose();
         }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeAsyncCore();
+        Dispose(false);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual async ValueTask DisposeAsyncCore()
+    {
+        _cts.Cancel();
+        await _fileEventDebouncer.DisposeAsync();
+        foreach (var semaphore in _fileLocks.Values)
+        {
+            semaphore.Dispose();
+        }
+        _cts.Dispose();
     }
 }
