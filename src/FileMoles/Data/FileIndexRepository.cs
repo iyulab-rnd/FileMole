@@ -167,7 +167,7 @@ internal class FileIndexRepository : IRepository<FileIndex>
         using var command = connection.CreateCommand();
         command.CommandText = @"
                 SELECT * FROM FileIndex 
-                WHERE Name LIKE @SearchTerm OR FullPath LIKE @SearchTerm";
+                WHERE FullPath LIKE @SearchTerm";
         command.Parameters.AddWithValue("@SearchTerm", $"%{searchTerm}%");
 
         var list = new List<FileIndex>();

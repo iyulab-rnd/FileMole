@@ -19,7 +19,6 @@ public class FileMole : IDisposable, IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _initializationTask;
 
-    public TrackingConfigManager Config { get; }
     public TrackingManager Tracking { get; }
 
     public event EventHandler<FileMoleEventArgs>? FileCreated;
@@ -50,11 +49,10 @@ public class FileMole : IDisposable, IAsyncDisposable
         _fileSystemWatcher = new FileMoleFileSystemWatcher(_fileIndexer, ignoreManager);
         _storageProviders = [];
 
-        Config = new TrackingConfigManager(dataPath);
         Tracking = new TrackingManager();
         Tracking.Init(new InternalTrackingManager(
+            ignoreManager,
             options.DebounceTime,
-            Config,
             OnFileContentChanged,
             unitOfWork,
             backupManager));

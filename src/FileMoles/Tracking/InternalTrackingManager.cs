@@ -3,13 +3,14 @@ using FileMoles.Diff;
 using FileMoles.Events;
 using FileMoles.Interfaces;
 using FileMoles.Internal;
+using iText.StyledXmlParser.Css.Selector.Item;
 using System.Collections.Concurrent;
 
 namespace FileMoles.Tracking;
 
 internal class InternalTrackingManager : IDisposable, IAsyncDisposable
 {
-    private readonly TrackingConfigManager _configManager;
+    private readonly FileIgnoreManager _ignoreManager;
     private readonly EventDebouncer<FileSystemEvent> _fileEventDebouncer;
     private readonly EventHandler<FileContentChangedEventArgs> _fileContentChangedHandler;
     private readonly InMemoryFileTrackingStore _trackingStore;
@@ -18,13 +19,13 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
 
     public InternalTrackingManager(
+        FileIgnoreManager ignoreManager,
         int debounceTime,
-        TrackingConfigManager configManager,
         EventHandler<FileContentChangedEventArgs> fileContentChangedHandler,
         IUnitOfWork unitOfWork,
         IFileBackupManager backupManager)
     {
-        _configManager = configManager;
+        _ignoreManager = ignoreManager;
         _fileEventDebouncer = new EventDebouncer<FileSystemEvent>(debounceTime, OnDebouncedFileEvents);
         _fileContentChangedHandler = fileContentChangedHandler;
         _trackingStore = new InMemoryFileTrackingStore(unitOfWork);
@@ -205,16 +206,29 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
 
     private Task<bool> ShouldTrackFileAsync(string filePath, CancellationToken cancellationToken)
     {
-        // 이미 추적대상인 파일
-        if (_trackingStore.IsTrackingFile(filePath))
-            return Task.FromResult(true);
-
-        // 추적 폴더내 속한 파일
-        if (File.Exists(filePath) &&
-            _trackingStore.IsTrackingFile(Path.GetDirectoryName(filePath)!) &&
-            _configManager.ShouldTrackFile(filePath))
+        // 추적 폴더내 파일
+        if (File.Exists(filePath))
         {
-            return Task.FromResult(true);
+            // 이미 추적대상인 파일
+            if (_trackingStore.IsTrackingFile(filePath))
+            {
+                return Task.FromResult(true);
+            }
+            else
+            {
+                if (_ignoreManager.ShouldIgnore(filePath))
+                {
+                    // 추적 대상이 아닌 파일
+                    return Task.FromResult(false);
+                }
+
+                var dir = Path.GetDirectoryName(filePath)!;
+                // 추적 대상 폴더내 파일은 추적 대상
+                if (_trackingStore.IsTrackingFile(dir))
+                {
+                    return Task.FromResult(true);
+                }
+            }
         }
 
         return Task.FromResult(false);

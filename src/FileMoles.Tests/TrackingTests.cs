@@ -29,7 +29,7 @@ public class TrackingTests : TestBase
     public async Task IgnorePattern_ShouldNotTrackMatchingFiles()
     {
         var filePath = await CreateUniqueFileAsync();
-        FileMole.Config.AddIgnorePattern("*.tmp");
+
         await FileMole.Tracking.EnableAsync(TestPath);
         await FileMole.Tracking.WaitForInitialScanCompletionAsync();
 
@@ -47,7 +47,6 @@ public class TrackingTests : TestBase
     public async Task IncludePattern_ShouldOnlyTrackMatchingFiles()
     {
         var filePath = await CreateUniqueFileAsync();
-        FileMole.Config.AddIncludePattern("*.txt");
         await FileMole.Tracking.EnableAsync(TestPath);
 
         var contentChanged = false;

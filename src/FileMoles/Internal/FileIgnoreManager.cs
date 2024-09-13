@@ -1,76 +1,144 @@
-﻿using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
+﻿using GlobExpressions;
+using System.Diagnostics;
+using System.Text;
 
 namespace FileMoles.Internal;
 
+#if DEBUG
+public class FileIgnoreManager
+#else
 internal class FileIgnoreManager
+#endif
 {
-    private readonly ConcurrentDictionary<string, bool> _ignoredPaths = new();
-    private readonly ConcurrentDictionary<string, Regex> _ignoredPatterns = new();
+    private readonly List<Glob> _globs = [];
+    private readonly string _configPath;
+    private readonly string _dataPath;
+    private readonly List<string> _patterns = [];
 
-    public FileIgnoreManager(string datPath)
+    public FileIgnoreManager(string dataPath)
     {
-        var configPath = Path.Combine(datPath, Constants.MonitoringIgnoreFileName);
-        LoadIgnoreFile(configPath);
-        AddDefaultIgnores();
+        _dataPath = dataPath;
+        _configPath = Path.Combine(dataPath, Constants.IgnoreFileName);
+        if (!File.Exists(_configPath))
+        {
+            File.WriteAllText(_configPath, GetDefaultIgnoresText());
+        }
+        LoadIgnoreFile(_configPath);
     }
 
     private void LoadIgnoreFile(string path)
     {
-        if (File.Exists(path))
+        foreach (var line in File.ReadLines(path))
         {
-            foreach (var line in File.ReadAllLines(path))
+            var trimmedLine = line.Trim();
+            if (!string.IsNullOrEmpty(trimmedLine) && !trimmedLine.StartsWith("#"))
             {
-                if (!string.IsNullOrWhiteSpace(line) && !line.StartsWith('#'))
-                {
-                    AddIgnorePattern(line.Trim());
-                }
+                AddPattern(trimmedLine);
             }
-        }
-    }
-
-    private void AddDefaultIgnores()
-    {
-        var defaultIgnores = new[]
-        {
-            "filemole*", "*.db-journal", ".git", ".svn", ".hg", ".vs", ".vscode",
-            "*.suo", "*.user", "*.userosscache", "*.sln.docstates", "bin", "obj",
-            "packages", "node_modules", "*.log", "*.sqlite", ".DS_Store", "Thumbs.db",
-            "*.tmp", "*.temp", "~$*", "*.bak", "*.swp", "project.lock.json",
-            "project.fragment.lock.json", "artifacts", "*.cache", "*.orig"
-        };
-
-        foreach (var ignore in defaultIgnores)
-        {
-            AddIgnorePattern(ignore);
         }
     }
 
     public void AddIgnorePattern(string pattern)
     {
-        if (Path.IsPathRooted(pattern))
-        {
-            _ignoredPaths[Path.GetFullPath(pattern)] = true;
-        }
-        else
-        {
-            _ignoredPatterns[pattern] = new Regex(WildcardToRegex(pattern), RegexOptions.IgnoreCase);
-        }
+        AddPattern(pattern);
+        File.AppendAllText(_configPath, Environment.NewLine + pattern);
+    }
+
+    private void AddPattern(string pattern)
+    {
+        string adjustedPattern = 
+            pattern.EndsWith('/') 
+            ? $"**/{pattern}**" 
+            : $"**/{pattern}";
+        _globs.Add(new Glob(adjustedPattern, GlobOptions.CaseInsensitive));
+        _patterns.Add(adjustedPattern);
     }
 
     public bool ShouldIgnore(string path)
     {
-        if (_ignoredPaths.ContainsKey(Path.GetFullPath(path)))
+        string fullPath = Path.GetFullPath(Path.Combine(_dataPath, path));
+        if (IsHiddenFileOrDirectory(fullPath))
+        {
             return true;
+        }
+        string relativePath = Path.GetRelativePath(_dataPath, fullPath).Replace('\\', '/');
 
-        var fileName = Path.GetFileName(path);
-        return _ignoredPatterns.Values.Any(regex => regex.IsMatch(fileName) || regex.IsMatch(path));
+        Debug.WriteLine($"Checking path: {relativePath}");
+        Debug.WriteLine($"Patterns: {string.Join(", ", _patterns)}");
+
+        return _globs.Any(glob =>
+        {
+            bool isMatch = glob.IsMatch(relativePath);
+            if (isMatch) Debug.WriteLine($"Matched pattern: {glob}");
+            return isMatch;
+        });
     }
 
-    private static string WildcardToRegex(string pattern)
+    public string GetPatternsDebugInfo() =>
+        $"Current patterns:{Environment.NewLine}{string.Join(Environment.NewLine, _patterns.Select(p => $"- {p}"))}";
+
+    private bool IsHiddenFileOrDirectory(string path)
     {
-        return "^" + Regex.Escape(pattern)
-                          .Replace("\\*", ".*")
-                          .Replace("\\?", ".") + "$";
+        foreach (var part in path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Skip(1))
+        {
+            path = Path.Combine(path, part);
+            if (IsHiddenEntry(path))
+            {
+                return true;
+            }
+        }
+        return false;
     }
+
+    private static bool IsHiddenEntry(string path)
+    {
+        if (Path.GetFileName(path).StartsWith(".", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                return new FileInfo(path).Attributes.HasFlag(FileAttributes.Hidden);
+            }
+            if (Directory.Exists(path))
+            {
+                var dirInfo = new DirectoryInfo(path);
+                return dirInfo.Parent != null && dirInfo.Attributes.HasFlag(FileAttributes.Hidden);
+            }
+        }
+        catch
+        {
+            // 접근 권한 문제 등으로 인한 예외 발생 시 무시
+        }
+
+        return false;
+    }
+
+    private static string GetDefaultIgnoresText() => @"# Generals
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+*.log
+logs/
+
+# Coding
+node_modules/
+build/
+dist/
+bin/
+obj/
+packages/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+";
 }

@@ -16,7 +16,8 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
 
     public async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
-        if (IOHelper.IsHidden(file.FullName))
+        if (file.Attributes.HasFlag(FileAttributes.Directory) || 
+            IOHelper.IsHidden(file.FullName))
         {
             return false;
         }
@@ -44,11 +45,10 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // RefreshFileIndex 비동기 작업을 수행하고 완료를 기다리지 않습니다.
             _ = RefreshFileIndexAsync(fileIndex);
 
             var file = new FileInfo(fileIndex.FullPath);
-            if (file.Exists)
+            if (file.Exists && !file.Attributes.HasFlag(FileAttributes.Directory))
             {
                 yield return file;
             }
@@ -117,7 +117,7 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
 
     internal async Task TryIndexFileAsync(FileInfo fileInfo)
     {
-        if (await HasFileChangedAsync(fileInfo))
+        if (!fileInfo.Attributes.HasFlag(FileAttributes.Directory) && await HasFileChangedAsync(fileInfo))
         {
             await IndexFileAsync(fileInfo);
         }

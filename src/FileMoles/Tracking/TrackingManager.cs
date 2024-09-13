@@ -29,9 +29,19 @@ namespace FileMoles.Tracking
             await manager.SyncTrackingFilesAsync(cancellationToken);
         }
 
-        public async Task<bool> EnableAsync(string filePath)
+        public bool IsTrackedFile(string path)
         {
-            return await manager.EnableAsync(filePath, _cts.Token);
+            return manager.IsTrackedFile(path);
+        }
+
+        public Task<bool> EnableAsync(string filePath)
+        {
+            return manager.EnableAsync(filePath, _cts.Token);
+        }
+
+        public Task<bool> DisableAsync(string path)
+        {
+            return manager.DisableAsync(path, _cts.Token);
         }
 
         public async Task WaitForInitialScanCompletionAsync(CancellationToken cancellationToken = default)
