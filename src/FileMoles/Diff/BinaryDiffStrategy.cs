@@ -11,10 +11,10 @@ public class BinaryDiffResult : DiffResult
 
 public class BinaryDiffStrategy : IDiffStrategy
 {
-    public async Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath)
+    public async Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath, CancellationToken cancellationToken = default)
     {
-        var oldHash = await CalculateFileHashAsync(oldFilePath);
-        var newHash = await CalculateFileHashAsync(newFilePath);
+        var oldHash = await CalculateFileHashAsync(oldFilePath, cancellationToken);
+        var newHash = await CalculateFileHashAsync(newFilePath, cancellationToken);
 
         var result = new BinaryDiffResult
         {
@@ -31,11 +31,11 @@ public class BinaryDiffStrategy : IDiffStrategy
         return result;
     }
 
-    private static async Task<string> CalculateFileHashAsync(string filePath)
+    private static async Task<string> CalculateFileHashAsync(string filePath, CancellationToken cancellationToken = default)
     {
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         using var stream = File.OpenRead(filePath);
-        var hash = await sha256.ComputeHashAsync(stream);
+        var hash = await sha256.ComputeHashAsync(stream, cancellationToken);
         return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
     }
 }

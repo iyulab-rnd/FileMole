@@ -115,6 +115,14 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
         await _unitOfWork.FileIndices.ClearAsync();
     }
 
+    internal async Task TryIndexFileAsync(FileInfo fileInfo)
+    {
+        if (await HasFileChangedAsync(fileInfo))
+        {
+            await IndexFileAsync(fileInfo);
+        }
+    }
+
     public void Dispose()
     {
         Dispose(true);

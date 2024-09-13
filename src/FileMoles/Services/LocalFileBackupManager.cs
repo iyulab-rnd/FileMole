@@ -22,10 +22,10 @@ internal class LocalFileBackupManager : IFileBackupManager
     {
         var backupPath = GetBackupPath(filePath);
         IOHelper.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-        await SafeFileIO.CopyWithRetryAsync(filePath, backupPath, cancellationToken: cancellationToken);
+        await SafeFileIO.CopyAsync(filePath, backupPath, cancellationToken: cancellationToken);
     }
 
-    public Task<string> GetBackupPathAsync(string filePath)
+    public Task<string> GetBackupPathAsync(string filePath, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(GetBackupPath(filePath));
     }
@@ -35,7 +35,7 @@ internal class LocalFileBackupManager : IFileBackupManager
         var backupPath = GetBackupPath(filePath);
         if (File.Exists(backupPath))
         {
-            await SafeFileIO.DeleteRetryAsync(backupPath, cancellationToken: cancellationToken);
+            await SafeFileIO.DeleteAsync(backupPath, cancellationToken: cancellationToken);
         }
     }
 

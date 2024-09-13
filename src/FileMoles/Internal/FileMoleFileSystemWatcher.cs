@@ -9,7 +9,7 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new();
     private readonly FileIgnoreManager _ignoreManager;
     private readonly FileIndexer _fileIndexer;
-    private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(400);
+    private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(300);
     private readonly ConcurrentDictionary<string, DateTime> _lastEventTime = new();
     private readonly ConcurrentDictionary<string, Task> _processingTasks = new();
     private bool _disposed = false;
@@ -163,15 +163,17 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task ProcessEventAsync(string fullPath, WatcherChangeTypes changeType, string? oldPath = null)
+    private Task ProcessEventAsync(string fullPath, WatcherChangeTypes changeType, string? oldPath = null)
     {
         try
         {
             if (changeType == WatcherChangeTypes.Deleted)
             {
                 FileDeleted?.Invoke(this, new FileSystemEvent(changeType, fullPath));
-                await _fileIndexer.RemoveFileAsync(fullPath);
-                return;
+
+                // 비동기적으로 인덱스를 수행합니다.
+                _ = _fileIndexer.RemoveFileAsync(fullPath);
+                return Task.CompletedTask;
             }
 
             if (changeType == WatcherChangeTypes.Renamed && oldPath != null)
@@ -181,37 +183,40 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
                 {
                     FileRenamed?.Invoke(this, new FileSystemEvent(changeType, fullPath, oldPath));
 
-                    await _fileIndexer.RemoveFileAsync(oldPath);
-                    await _fileIndexer.IndexFileAsync(info);
+                    // 비동기적으로 인덱스를 수행합니다.
+                    _ = _fileIndexer.RemoveFileAsync(oldPath);
+                    _ = _fileIndexer.IndexFileAsync(info);
                 }
                 else
                 {
-                    await _fileIndexer.RemoveFileAsync(oldPath);
+                    // 비동기적으로 인덱스를 수행합니다.
+                    _ = _fileIndexer.RemoveFileAsync(oldPath);
                 }
-                return;
+                return Task.CompletedTask;
             }
 
             var fileInfo = new FileInfo(fullPath);
             if (fileInfo.Exists)
             {
-                if (changeType == WatcherChangeTypes.Created || await _fileIndexer.HasFileChangedAsync(fileInfo))
+                if (changeType == WatcherChangeTypes.Created)
                 {
-                    if (changeType == WatcherChangeTypes.Created)
-                    {
-                        FileCreated?.Invoke(this, new FileSystemEvent(changeType, fullPath));
-                    }
-                    else
-                    {
-                        FileChanged?.Invoke(this, new FileSystemEvent(changeType, fullPath));
-                    }
-                    await _fileIndexer.IndexFileAsync(fileInfo);
+                    FileCreated?.Invoke(this, new FileSystemEvent(changeType, fullPath));
                 }
+                else if (changeType == WatcherChangeTypes.Changed)
+                {
+                    FileChanged?.Invoke(this, new FileSystemEvent(changeType, fullPath));
+                }
+
+                // 비동기적으로 인덱스를 수행합니다.
+                _ = _fileIndexer.TryIndexFileAsync(fileInfo);
             }
         }
         catch (Exception ex)
         {
             Logger.WriteLine($"Error processing event: {ex.Message}");
         }
+
+        return Task.CompletedTask;
     }
 
     public Task UnwatchDirectoryAsync(string path)

@@ -6,7 +6,7 @@ public static class SafeFileIO
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _pathLocks = new();
 
-    public static async Task WriteAllTextWithRetryAsync(string path, string contents, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
+    public static async Task WriteAllTextAsync(string path, string contents, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
         var semaphore = _pathLocks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
 
@@ -33,7 +33,7 @@ public static class SafeFileIO
         }
     }
 
-    public static async Task DeleteRetryAsync(string path, int maxRetries = 5, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
+    public static async Task DeleteAsync(string path, int maxRetries = 5, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
         var semaphore = _pathLocks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
 
@@ -66,7 +66,7 @@ public static class SafeFileIO
         }
     }
 
-    public static async Task CopyWithRetryAsync(string sourcePath, string destinationPath, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
+    public static async Task CopyAsync(string sourcePath, string destinationPath, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
     {
         var sourceSemaphore = _pathLocks.GetOrAdd(sourcePath, _ => new SemaphoreSlim(1, 1));
         var destSemaphore = _pathLocks.GetOrAdd(destinationPath, _ => new SemaphoreSlim(1, 1));
@@ -130,6 +130,77 @@ public static class SafeFileIO
         {
             string destDir = Path.Combine(destinationPath, Path.GetFileName(dir));
             CopyDirectory(dir, destDir);
+        }
+    }
+
+    public static async Task AppendAllTextAsync(string filePath, string contents, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
+    {
+        var semaphore = _pathLocks.GetOrAdd(filePath, _ => new SemaphoreSlim(1, 1));
+
+        await semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    using var streamWriter = new StreamWriter(filePath, append: true);
+                    await streamWriter.WriteAsync(contents.AsMemory(), cancellationToken);
+                    return;
+                }
+                catch (IOException) when (i < maxRetries - 1)
+                {
+                    await Task.Delay(delayMilliseconds, cancellationToken);
+                }
+            }
+            throw new IOException($"Failed to append to file after {maxRetries} attempts: {filePath}");
+        }
+        finally
+        {
+            semaphore.Release();
+        }
+    }
+
+    public static async Task MoveAsync(string sourceFileName, string destFileName, int maxRetries = 3, int delayMilliseconds = 100, CancellationToken cancellationToken = default)
+    {
+        var sourceSemaphore = _pathLocks.GetOrAdd(sourceFileName, _ => new SemaphoreSlim(1, 1));
+        var destSemaphore = _pathLocks.GetOrAdd(destFileName, _ => new SemaphoreSlim(1, 1));
+
+        await sourceSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            await destSemaphore.WaitAsync(cancellationToken);
+            try
+            {
+                for (int i = 0; i < maxRetries; i++)
+                {
+                    try
+                    {
+                        if (File.Exists(sourceFileName))
+                        {
+                            File.Move(sourceFileName, destFileName);
+                            return;
+                        }
+                        else
+                        {
+                            throw new FileNotFoundException($"Source file not found: {sourceFileName}");
+                        }
+                    }
+                    catch (IOException) when (i < maxRetries - 1)
+                    {
+                        await Task.Delay(delayMilliseconds, cancellationToken);
+                    }
+                }
+                throw new IOException($"Failed to move file after {maxRetries} attempts: {sourceFileName} to {destFileName}");
+            }
+            finally
+            {
+                destSemaphore.Release();
+            }
+        }
+        finally
+        {
+            sourceSemaphore.Release();
         }
     }
 }

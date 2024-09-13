@@ -28,10 +28,10 @@ public enum DiffType
 
 public class TextDiffStrategy : IDiffStrategy
 {
-    public async Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath)
+    public async Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath, CancellationToken cancellationToken = default)
     {
-        var oldText = await File.ReadAllTextAsync(oldFilePath);
-        var newText = await File.ReadAllTextAsync(newFilePath);
+        var oldText = await File.ReadAllTextAsync(oldFilePath, cancellationToken);
+        var newText = await File.ReadAllTextAsync(newFilePath, cancellationToken);
 
         var diffBuilder = new InlineDiffBuilder(new Differ());
         var diff = diffBuilder.BuildDiffModel(oldText, newText);

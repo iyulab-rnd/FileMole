@@ -83,7 +83,9 @@ internal class EventDebouncer<T> : IDisposable, IAsyncDisposable
                 await _timer.DisposeAsync();
             }
 
-            _semaphore.Dispose();
+            // Only dispose semaphore once
+            _semaphore?.Dispose();
+
             _disposed = true;
         }
     }

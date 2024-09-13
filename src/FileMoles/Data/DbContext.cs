@@ -136,7 +136,7 @@ internal class DbContext : IUnitOfWork
     {
         try
         {
-            await Task.WhenAll(_pendingTasks.ToArray());
+            await Task.WhenAll([.. _pendingTasks]);
         }
         catch (Exception ex)
         {

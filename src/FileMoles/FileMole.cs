@@ -384,7 +384,7 @@ public class FileMole : IDisposable, IAsyncDisposable
                 }
                 catch (AggregateException ae)
                 {
-                    if (!(ae.InnerException is OperationCanceledException))
+                    if (ae.InnerException is not OperationCanceledException)
                     {
                         throw;
                     }

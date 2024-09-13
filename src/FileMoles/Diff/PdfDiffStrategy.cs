@@ -18,7 +18,7 @@ public class PdfDiffResult : DiffResult
 
 public class PdfDiffStrategy : IDiffStrategy
 {
-    public async Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath)
+    public async Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath, CancellationToken cancellationToken = default)
     {
         var oldText = await ExtractTextFromPdfAsync(oldFilePath);
         var newText = await ExtractTextFromPdfAsync(newFilePath);

@@ -1,6 +1,7 @@
 ﻿using DiffPlex.DiffBuilder.Model;
 using DiffPlex.DiffBuilder;
 using DiffPlex;
+using System.Threading;
 
 namespace FileMoles.Diff;
 
@@ -18,7 +19,7 @@ public class OdfDiffEntry
 
 public class OdfDiffStrategy : IDiffStrategy
 {
-    public async Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath)
+    public async Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath, CancellationToken cancellationToken = default)
     {
         var oldContent = await ExtractContentFromOdfAsync(oldFilePath);
         var newContent = await ExtractContentFromOdfAsync(newFilePath);

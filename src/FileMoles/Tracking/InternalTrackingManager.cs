@@ -9,11 +9,9 @@ namespace FileMoles.Tracking;
 
 internal class InternalTrackingManager : IDisposable, IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileLocks = new();
     private readonly TrackingConfigManager _configManager;
     private readonly EventDebouncer<FileSystemEvent> _fileEventDebouncer;
     private readonly EventHandler<FileContentChangedEventArgs> _fileContentChangedHandler;
-    private readonly FileHashGenerator _hashGenerator;
     private readonly InMemoryFileTrackingStore _trackingStore;
     private readonly ConcurrentDictionary<string, bool> _trackedDirectories = new();
     private readonly IFileBackupManager _backupManager;
@@ -29,7 +27,6 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         _configManager = configManager;
         _fileEventDebouncer = new EventDebouncer<FileSystemEvent>(debounceTime, OnDebouncedFileEvents);
         _fileContentChangedHandler = fileContentChangedHandler;
-        _hashGenerator = new FileHashGenerator();
         _trackingStore = new InMemoryFileTrackingStore(unitOfWork);
         _backupManager = backupManager;
     }
@@ -51,10 +48,10 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
                 {
                     foreach (var file in Directory.GetFiles(trackingFile.FullPath))
                     {
-                        if (await ShouldTrackFileAsync(file)
+                        if (await ShouldTrackFileAsync(file, cancellationToken)
                             && !_trackingStore.TryGetTrackingFile(file, out _))
                         {
-                            await EnableAsync(file);
+                            await EnableAsync(file, cancellationToken);
                         }
                     }
                 }
@@ -72,24 +69,24 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
 
         if (!File.Exists(filePath) && !Directory.Exists(filePath))
         {
-            await RemoveTrackedFileAndBackupAsync(filePath);
+            await RemoveTrackedFileAndBackupAsync(filePath, cancellationToken);
         }
-        else if (!await _backupManager.BackupExistsAsync(filePath) && File.Exists(filePath))
+        else if (!await _backupManager.BackupExistsAsync(filePath, cancellationToken) && File.Exists(filePath))
         {
-            await TrackFileAsync(filePath);
+            await TrackFileAsync(filePath, cancellationToken);
         }
-        else if (await _backupManager.BackupExistsAsync(filePath) && File.Exists(filePath))
+        else if (await _backupManager.BackupExistsAsync(filePath, cancellationToken) && File.Exists(filePath))
         {
-            if (await _backupManager.HasFileChangedAsync(filePath))
+            if (await _backupManager.HasFileChangedAsync(filePath, cancellationToken))
             {
-                await TrackFileAsync(filePath);
+                await TrackFileAsync(filePath, cancellationToken);
             }
         }
     }
 
-    private async Task<DiffResult?> TrackAndGetDiffAsync(string filePath)
+    private async Task<DiffResult?> TrackAndGetDiffAsync(string filePath, CancellationToken cancellationToken)
     {
-        if (!await ShouldTrackFileAsync(filePath))
+        if (!await ShouldTrackFileAsync(filePath, cancellationToken))
         {
             return null;
         }
@@ -98,32 +95,32 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         {
             DiffResult diff;
 
-            if (await _backupManager.BackupExistsAsync(filePath))
+            if (await _backupManager.BackupExistsAsync(filePath, cancellationToken))
             {
                 var diffStrategy = DiffStrategyFactory.CreateStrategy(filePath);
-                var backupPath = await _backupManager.GetBackupPathAsync(filePath);
-                diff = await diffStrategy.GenerateDiffAsync(backupPath, filePath);
+                var backupPath = await _backupManager.GetBackupPathAsync(filePath, cancellationToken);
+                diff = await diffStrategy.GenerateDiffAsync(backupPath, filePath, cancellationToken);
             }
             else
             {
                 diff = new TextDiffResult
                 {
                     FileType = "Text",
-                    Entries = new List<TextDiffEntry>
-                    {
+                    Entries =
+                    [
                         new TextDiffEntry
                         {
                             Type = DiffType.Inserted,
-                            ModifiedText = await File.ReadAllTextAsync(filePath)
+                            ModifiedText = await File.ReadAllTextAsync(filePath, cancellationToken)
                         }
-                    },
+                    ],
                     IsInitial = true
                 };
             }
 
             if (diff.IsChanged || diff.IsInitial)
             {
-                await TrackFileAsync(filePath);
+                _ = TrackFileAsync(filePath, cancellationToken); // Fire and forget
             }
 
             return diff;
@@ -135,35 +132,25 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task TrackFileAsync(string filePath)
+    private async Task TrackFileAsync(string filePath, CancellationToken cancellationToken)
     {
-        var semaphore = _fileLocks.GetOrAdd(filePath, _ => new SemaphoreSlim(1, 1));
+        await _backupManager.BackupFileAsync(filePath, cancellationToken);
 
-        await semaphore.WaitAsync();
-        try
+        if (_trackingStore.TryGetTrackingFile(filePath, out var trackingFile) && trackingFile != null)
         {
-            await _backupManager.BackupFileAsync(filePath);
-
-            if (_trackingStore.TryGetTrackingFile(filePath, out var trackingFile) && trackingFile != null)
-            {
-                trackingFile.LastTrackedTime = DateTime.UtcNow;
-                _trackingStore.AddOrUpdateTrackingFile(trackingFile);
-            }
-        }
-        finally
-        {
-            semaphore.Release();
+            trackingFile.LastTrackedTime = DateTime.UtcNow;
+            _trackingStore.AddOrUpdateTrackingFile(trackingFile);
         }
     }
 
-    private async Task<bool> RemoveTrackedFileAndBackupAsync(string filePath)
+    private async Task<bool> RemoveTrackedFileAndBackupAsync(string filePath, CancellationToken cancellationToken)
     {
-        if (_trackingStore.TryGetTrackingFile(filePath, out var trackingFile))
+        if (_trackingStore.TryGetTrackingFile(filePath, out var _))
         {
             try
             {
                 _trackingStore.RemoveTrackingFile(filePath);
-                await _backupManager.DeleteBackupAsync(filePath);
+                await _backupManager.DeleteBackupAsync(filePath, cancellationToken);
                 return true;
             }
             catch (Exception ex)
@@ -183,7 +170,7 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task<bool> HasFileChangedAsync(string filePath)
+    private async Task<bool> HasFileChangedAsync(string filePath, CancellationToken cancellationToken)
     {
         var fileInfo = new FileInfo(filePath);
         if (!fileInfo.Exists)
@@ -196,7 +183,7 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
             return true; // No tracking info exists, so it's a new file
         }
 
-        return trackingFile == null || await _backupManager.HasFileChangedAsync(filePath);
+        return trackingFile == null || await _backupManager.HasFileChangedAsync(filePath, cancellationToken);
     }
 
     private TrackingFile? GetTrackingFile(string filePath)
@@ -216,7 +203,7 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         };
     }
 
-    private Task<bool> ShouldTrackFileAsync(string filePath)
+    private Task<bool> ShouldTrackFileAsync(string filePath, CancellationToken cancellationToken)
     {
         // 이미 추적대상인 파일
         if (_trackingStore.IsTrackingFile(filePath))
@@ -233,7 +220,7 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         return Task.FromResult(false);
     }
 
-    public async Task<bool> EnableAsync(string path)
+    public async Task<bool> EnableAsync(string path, CancellationToken cancellationToken)
     {
         if (!File.Exists(path) && !Directory.Exists(path))
         {
@@ -253,22 +240,22 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         if (isDirectory)
         {
             _trackedDirectories[path] = true;
-            await InitializeTrackedFilesAsync(path);
+            await InitializeTrackedFilesAsync(path, cancellationToken);
         }
         else
         {
-            await TrackSingleFileAsync(path);
+            await TrackSingleFileAsync(path, cancellationToken);
         }
 
         return true;
     }
 
-    private async Task InitializeTrackedFilesAsync(string directoryPath)
+    private async Task InitializeTrackedFilesAsync(string directoryPath, CancellationToken cancellationToken)
     {
-        var files = await GetTrackedFilesAsync(directoryPath);
+        var files = await GetTrackedFilesAsync(directoryPath, cancellationToken);
         foreach (var file in files)
         {
-            await TrackSingleFileAsync(file);
+            await TrackSingleFileAsync(file, cancellationToken);
         }
     }
 
@@ -291,22 +278,22 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
             case WatcherChangeTypes.Created:
                 if (IsInTrackedDirectory(e.FullPath))
                 {
-                    await EnableAsync(e.FullPath);
+                    await EnableAsync(e.FullPath, cancellationToken);
                 }
                 break;
             case WatcherChangeTypes.Deleted:
                 _trackedDirectories.TryRemove(e.FullPath, out _);
-                await DisableAsync(e.FullPath);
+                await DisableAsync(e.FullPath, cancellationToken);
                 break;
             case WatcherChangeTypes.Renamed:
                 if (e.OldFullPath != null)
                 {
                     _trackedDirectories.TryRemove(e.OldFullPath, out _);
-                    await DisableAsync(e.OldFullPath);
+                    await DisableAsync(e.OldFullPath, cancellationToken);
                 }
                 if (IsInTrackedDirectory(e.FullPath))
                 {
-                    await EnableAsync(e.FullPath);
+                    await EnableAsync(e.FullPath, cancellationToken);
                 }
                 break;
         }
@@ -314,7 +301,7 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
 
     private async Task HandleFileEventInternalAsync(FileSystemEvent e, CancellationToken cancellationToken)
     {
-        if (await ShouldTrackFileAsync(e.FullPath) || IsInTrackedDirectory(e.FullPath))
+        if (await ShouldTrackFileAsync(e.FullPath, cancellationToken) || IsInTrackedDirectory(e.FullPath))
         {
             await _fileEventDebouncer.DebounceAsync(e.FullPath, e);
         }
@@ -342,9 +329,9 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
             {
                 case WatcherChangeTypes.Created:
                 case WatcherChangeTypes.Changed:
-                    if (await HasFileChangedAsync(e.FullPath))
+                    if (await HasFileChangedAsync(e.FullPath, _cts.Token))
                     {
-                        var diff = await TrackAndGetDiffAsync(e.FullPath);
+                        var diff = await TrackAndGetDiffAsync(e.FullPath, _cts.Token);
                         if (diff != null && (diff.IsChanged || diff.IsInitial))
                         {
                             _fileContentChangedHandler.Invoke(
@@ -354,14 +341,14 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
                     }
                     break;
                 case WatcherChangeTypes.Deleted:
-                    await RemoveTrackedFileAsync(e.FullPath);
+                    await RemoveTrackedFileAsync(e.FullPath, _cts.Token);
                     break;
                 case WatcherChangeTypes.Renamed:
                     if (e.OldFullPath != null)
                     {
-                        await RemoveTrackedFileAsync(e.OldFullPath);
+                        await RemoveTrackedFileAsync(e.OldFullPath, _cts.Token);
                     }
-                    if (await ShouldTrackFileAsync(e.FullPath) || IsInTrackedDirectory(e.FullPath))
+                    if (await ShouldTrackFileAsync(e.FullPath, _cts.Token) || IsInTrackedDirectory(e.FullPath))
                     {
                         await ProcessFileEventAsync(new FileSystemEvent(WatcherChangeTypes.Created, e.FullPath));
                     }
@@ -374,46 +361,41 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task TrackSingleFileAsync(string filePath)
+    private async Task TrackSingleFileAsync(string filePath, CancellationToken cancellationToken)
     {
-        if (await ShouldTrackFileAsync(filePath))
+        if (await ShouldTrackFileAsync(filePath, cancellationToken))
         {
             var trackingFile = GetOrNewTrackingFile(filePath);
-            await TrackFileAsync(filePath);
+            await TrackFileAsync(filePath, cancellationToken);
         }
     }
 
-    public async Task<bool> DisableAsync(string path)
+    public async Task<bool> DisableAsync(string path, CancellationToken cancellationToken)
     {
         if (_trackingStore.IsTrackingFile(path))
         {
-            await DisableTrackingForDirectoryAsync(path);
-            return await RemoveTrackedFileAndBackupAsync(path);
+            await DisableTrackingForDirectoryAsync(path, cancellationToken);
+            return await RemoveTrackedFileAndBackupAsync(path, cancellationToken);
         }
         return false;
     }
 
-    private async Task DisableTrackingForDirectoryAsync(string path)
+    private async Task DisableTrackingForDirectoryAsync(string path, CancellationToken cancellationToken)
     {
         var trackedFiles = _trackingStore.GetTrackedFilesInDirectory(path);
         foreach (var file in trackedFiles)
         {
-            await RemoveTrackedFileAndBackupAsync(file);
+            await RemoveTrackedFileAndBackupAsync(file, cancellationToken);
         }
     }
 
-    private void RemoveTrackedFile(string filePath)
+    private async Task<List<string>> GetTrackedFilesAsync(string path, CancellationToken cancellationToken)
     {
-        Task.Run(() => RemoveTrackedFileAndBackupAsync(filePath)).Forget();
-    }
-
-    private async Task<List<string>> GetTrackedFilesAsync(string path)
-    {
-        List<string> trackedFiles = new();
+        List<string> trackedFiles = [];
 
         if (File.Exists(path))
         {
-            if (await ShouldTrackFileAsync(path))
+            if (await ShouldTrackFileAsync(path, cancellationToken))
             {
                 trackedFiles.Add(path);
             }
@@ -422,7 +404,7 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         {
             foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
             {
-                if (await ShouldTrackFileAsync(file))
+                if (await ShouldTrackFileAsync(file, cancellationToken))
                 {
                     trackedFiles.Add(file);
                 }
@@ -441,10 +423,10 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         return _trackingStore.IsTrackingFile(filePath);
     }
 
-    private async Task RemoveTrackedFileAsync(string filePath)
+    private async Task RemoveTrackedFileAsync(string filePath, CancellationToken cancellationToken)
     {
         _trackingStore.RemoveTrackingFile(filePath);
-        await _backupManager.DeleteBackupAsync(filePath);
+        await _backupManager.DeleteBackupAsync(filePath, cancellationToken);
     }
 
     public void Dispose()
@@ -459,10 +441,6 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
         {
             _cts.Cancel();
             _fileEventDebouncer.Dispose();
-            foreach (var semaphore in _fileLocks.Values)
-            {
-                semaphore.Dispose();
-            }
             _cts.Dispose();
         }
     }
@@ -478,10 +456,6 @@ internal class InternalTrackingManager : IDisposable, IAsyncDisposable
     {
         _cts.Cancel();
         await _fileEventDebouncer.DisposeAsync();
-        foreach (var semaphore in _fileLocks.Values)
-        {
-            semaphore.Dispose();
-        }
         _cts.Dispose();
     }
 }

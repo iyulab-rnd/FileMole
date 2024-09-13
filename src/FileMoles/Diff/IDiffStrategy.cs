@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-
-namespace FileMoles.Diff;
+﻿namespace FileMoles.Diff;
 
 public interface IDiffStrategy
 {
-    Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath);
+    Task<DiffResult> GenerateDiffAsync(string oldFilePath, string newFilePath, CancellationToken cancellationToken = default);
 }
