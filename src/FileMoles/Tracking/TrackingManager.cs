@@ -6,7 +6,7 @@ namespace FileMoles.Tracking
     {
         private InternalTrackingManager manager = null!;
         private readonly CancellationTokenSource _cts = new();
-        private readonly TaskCompletionSource<bool> _initialScanCompletionSource = new();
+        private readonly TaskCompletionSource<bool> _isReady = new();
 
         internal void Init(InternalTrackingManager manager)
         {
@@ -18,15 +18,12 @@ namespace FileMoles.Tracking
             await manager.HandleFileEventAsync(e, token);
         }
 
-        internal async Task InitializeAsync(CancellationToken cancellationToken)
+        internal async Task ReadyAsync(CancellationToken cancellationToken)
         {
             await manager.InitializeAsync(cancellationToken);
-            _initialScanCompletionSource.SetResult(true);
-        }
-
-        internal async Task SyncTrackingFilesAsync(CancellationToken cancellationToken)
-        {
             await manager.SyncTrackingFilesAsync(cancellationToken);
+
+            _isReady.TrySetResult(true);
         }
 
         public bool IsTrackedFile(string path)
@@ -44,25 +41,25 @@ namespace FileMoles.Tracking
             return manager.DisableAsync(path, _cts.Token);
         }
 
-        public async Task WaitForInitialScanCompletionAsync(CancellationToken cancellationToken = default)
+        public async Task WaitForReadyAsync(CancellationToken cancellationToken = default)
         {
             if (cancellationToken == default)
             {
-                await _initialScanCompletionSource.Task;
+                await _isReady.Task;
                 return;
             }
 
             var tcs = new TaskCompletionSource<bool>();
             using var registration = cancellationToken.Register(() => tcs.TrySetCanceled());
 
-            await Task.WhenAny(_initialScanCompletionSource.Task, tcs.Task);
+            await Task.WhenAny(_isReady.Task, tcs.Task);
 
             if (cancellationToken.IsCancellationRequested)
             {
                 throw new OperationCanceledException("Waiting for initial scan completion was cancelled.", cancellationToken);
             }
 
-            await _initialScanCompletionSource.Task; // Ensure the task is truly completed
+            await _isReady.Task; // Ensure the task is truly completed
         }
 
         public void Dispose()

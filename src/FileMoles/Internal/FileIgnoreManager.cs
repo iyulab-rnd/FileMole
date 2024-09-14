@@ -62,14 +62,9 @@ internal class FileIgnoreManager
             return true;
         }
         string relativePath = Path.GetRelativePath(_dataPath, fullPath).Replace('\\', '/');
-
-        Debug.WriteLine($"Checking path: {relativePath}");
-        Debug.WriteLine($"Patterns: {string.Join(", ", _patterns)}");
-
         return _globs.Any(glob =>
         {
             bool isMatch = glob.IsMatch(relativePath);
-            if (isMatch) Debug.WriteLine($"Matched pattern: {glob}");
             return isMatch;
         });
     }
@@ -136,9 +131,13 @@ packages/
 
 # Database
 *.db
+*.db-journal
 *.sqlite
 *.sqlite3
 *.mdf
 *.ldf
+
+# System
+AppData/
 ";
 }

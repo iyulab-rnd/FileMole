@@ -4,6 +4,7 @@ using FileMoles.Internal;
 using FileMoles.Data;
 using FileMoles.Interfaces;
 using FileMoles.Tracking;
+using System.Runtime.CompilerServices;
 
 namespace FileMoles;
 
@@ -47,7 +48,7 @@ public class FileMole : IDisposable, IAsyncDisposable
 
         _fileIndexer = new FileIndexer(unitOfWork);
         _fileSystemWatcher = new FileMoleFileSystemWatcher(_fileIndexer, ignoreManager);
-        _storageProviders = [];
+        _storageProviders = new Dictionary<string, IStorageProvider>();
 
         Tracking = new TrackingManager();
         Tracking.Init(new InternalTrackingManager(
@@ -86,7 +87,7 @@ public class FileMole : IDisposable, IAsyncDisposable
 
         foreach (var mole in _options.Moles)
         {
-            _fileSystemWatcher.WatchDirectoryAsync(mole.Path);
+            _ = _fileSystemWatcher.WatchDirectoryAsync(mole.Path);
         }
     }
 
@@ -94,18 +95,19 @@ public class FileMole : IDisposable, IAsyncDisposable
     {
         return Task.Run(async () =>
         {
-            await Tracking.InitializeAsync(cancellationToken);
-            await InitialScanAsync(cancellationToken);
+            _ = Tracking.ReadyAsync(cancellationToken);
+
+            var scanStartTime = DateTime.UtcNow;
+
+            var scanTasks = _options.Moles.Select(mole => ScanDirectoryAsync(mole.Path, cancellationToken));
+            await Task.WhenAll(scanTasks);
+
+            // After scanning, remove any entries not updated during the scan
+            await _fileIndexer.RemoveEntriesNotScannedAfterAsync(scanStartTime, cancellationToken);
+
             IsInitialScanComplete = true;
             InitialScanCompleted?.Invoke(this, EventArgs.Empty);
         }, cancellationToken);
-    }
-
-    private async Task InitialScanAsync(CancellationToken cancellationToken)
-    {
-        var scanTasks = _options.Moles.Select(mole => ScanDirectoryAsync(mole.Path, cancellationToken));
-        await Task.WhenAll(scanTasks);
-        await Tracking.SyncTrackingFilesAsync(cancellationToken);
     }
 
     private async Task ScanDirectoryAsync(string path, CancellationToken cancellationToken)
@@ -117,36 +119,27 @@ public class FileMole : IDisposable, IAsyncDisposable
             var storageProvider = GetStorageProviderForPath(path)
                 ?? throw new ArgumentException($"No storage provider found for path: {path}");
 
-            var batchSize = 100;
-            var fileQueue = new System.Collections.Concurrent.ConcurrentQueue<FileInfo>();
-            var indexingTasks = new List<Task>();
-
-            async Task ProcessFileQueueAsync()
-            {
-                while (fileQueue.TryDequeue(out var file))
-                {
-                    await _fileIndexer.IndexFileAsync(file, cancellationToken);
-                }
-            }
-
+            // Get list of files on disk
+            var filesOnDisk = new List<FileInfo>();
             await foreach (var file in storageProvider.GetFilesAsync(path).WithCancellation(cancellationToken))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (IOHelper.IsHidden(file.FullName)) continue;
-
-                fileQueue.Enqueue(file);
-
-                if (fileQueue.Count >= batchSize)
-                {
-                    indexingTasks.Add(ProcessFileQueueAsync());
-                }
+                filesOnDisk.Add(file);
             }
 
-            indexingTasks.Add(ProcessFileQueueAsync());
+            // Upsert all files on disk
+            if (filesOnDisk.Count > 0)
+            {
+                await _fileIndexer.IndexFilesAsync(filesOnDisk, cancellationToken);
+            }
 
-            await Task.WhenAll(indexingTasks);
-
+            // Recursively scan subdirectories
             await foreach (var directory in storageProvider.GetDirectoriesAsync(path).WithCancellation(cancellationToken))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (IOHelper.IsHidden(directory.FullName)) continue;
 
                 await ScanDirectoryAsync(directory.FullName, cancellationToken);
@@ -154,12 +147,12 @@ public class FileMole : IDisposable, IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // 작업이 취소되었으므로 추가 처리가 필요 없습니다.
             throw;
         }
         catch (Exception ex)
         {
-            Logger.WriteLine($"Error scanning directory: {path}");
-            Logger.OnException(ex);
+            Logger.Error(ex, $"Error scanning directory: {path}");
         }
     }
 
@@ -313,11 +306,6 @@ public class FileMole : IDisposable, IAsyncDisposable
         return await _fileIndexer.GetFileCountAsync(path);
     }
 
-    public async Task ClearIndexAsync()
-    {
-        await _fileIndexer.ClearDatabaseAsync();
-    }
-
     private IStorageProvider? GetStorageProviderForPath(string path)
     {
         return _storageProviders
@@ -419,8 +407,6 @@ public class FileMole : IDisposable, IAsyncDisposable
         }
 
         await DisposeAsyncCore().ConfigureAwait(false);
-
-        Dispose(false);
         GC.SuppressFinalize(this);
     }
 
@@ -441,7 +427,7 @@ public class FileMole : IDisposable, IAsyncDisposable
 
         await _fileSystemWatcher.DisposeAsync().ConfigureAwait(false);
         await Tracking.DisposeAsync().ConfigureAwait(false);
-        await _fileIndexer.DisposeAsync().ConfigureAwait(false);
+        _fileIndexer.Dispose();
 
         foreach (var provider in _storageProviders.Values)
         {

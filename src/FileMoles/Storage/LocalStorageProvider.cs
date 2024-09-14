@@ -235,15 +235,15 @@ internal class LocalStorageProvider : IStorageProvider
             }
             catch (UnauthorizedAccessException ex)
             {
-                Logger.WriteLine($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
+                Logger.Error($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
             }
             catch (SecurityException ex)
             {
-                Logger.WriteLine($"Security error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
+                Logger.Error($"Security error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Logger.WriteLine($"Error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
+                Logger.Error($"Error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
             }
 
             return new ValueTask<bool>(false);
@@ -283,15 +283,15 @@ internal class LocalStorageProvider : IStorageProvider
             }
             catch (UnauthorizedAccessException ex)
             {
-                Logger.WriteLine($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
+                Logger.Error($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
             }
             catch (SecurityException ex)
             {
-                Logger.WriteLine($"Security error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
+                Logger.Error($"Security error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Logger.WriteLine($"Error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
+                Logger.Error($"Error accessing directory {_directoryInfo.FullName}. Error: {ex.Message}");
             }
 
             return new ValueTask<bool>(false);

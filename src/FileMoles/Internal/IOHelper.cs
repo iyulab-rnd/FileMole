@@ -31,17 +31,31 @@ internal static class IOHelper
                 while (!string.IsNullOrEmpty(currentPath))
                 {
                     var dirInfo = new DirectoryInfo(currentPath);
+
+                    // 루트 디렉토리인 경우 Hidden 속성을 무시하고 False 반환
+                    if (dirInfo.Parent == null)
+                    {
+                        break; // 루트 디렉토리에 도달하면 검사 중단
+                    }
+
                     if ((dirInfo.Attributes & FileAttributes.Hidden) == FileAttributes.Hidden)
                     {
                         return true;
                     }
-                    currentPath = Path.GetDirectoryName(currentPath);
+
+                    var parentPath = Path.GetDirectoryName(currentPath);
+                    if (parentPath == null || parentPath == currentPath)
+                    {
+                        break;
+                    }
+
+                    currentPath = parentPath;
                 }
             }
         }
         catch (Exception ex)
         {
-            Logger.WriteLine($"Error checking if path is hidden: {ex.Message}");
+            Logger.Error($"Error checking if path is hidden: {ex.Message}");
         }
         return false;
     }
@@ -66,7 +80,7 @@ internal static class IOHelper
                 }
                 catch (Exception ex)
                 {
-                    Logger.WriteLine($"Error creating directory: {ex.Message}");
+                    Logger.Error($"Error creating directory: {ex.Message}");
                     throw;
                 }
             }
@@ -88,7 +102,7 @@ internal static class IOHelper
             }
             catch (Exception ex)
             {
-                Logger.WriteLine($"Error setting hidden attribute: {ex.Message}");
+                Logger.Error($"Error setting hidden attribute: {ex.Message}");
             }
         }
     }

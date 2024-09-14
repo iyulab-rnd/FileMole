@@ -2,7 +2,6 @@
 
 internal class TrackingFile
 {
-    public int Id { get; set; }
     public required string FullPath { get; set; }
     public required string Hash { get; set; }
     public bool IsDirectory { get; set; }

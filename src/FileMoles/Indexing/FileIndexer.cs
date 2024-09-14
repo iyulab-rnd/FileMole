@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 
 namespace FileMoles.Indexing;
 
-internal class FileIndexer : IDisposable, IAsyncDisposable
+internal class FileIndexer : IDisposable
 {
     private readonly IUnitOfWork _unitOfWork;
     private bool _disposed;
@@ -16,38 +16,63 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
 
     public async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
-        if (file.Attributes.HasFlag(FileAttributes.Directory) || 
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (file.Attributes.HasFlag(FileAttributes.Directory) ||
             IOHelper.IsHidden(file.FullName))
         {
             return false;
         }
 
+        var fileIndex = FileIndex.CreateNew(file);
+        await _unitOfWork.FileIndices.UpsertAsync(fileIndex, cancellationToken);
+        return true;
+    }
+
+    public async Task<int> IndexFilesAsync(IEnumerable<FileInfo> files, CancellationToken cancellationToken = default)
+    {
+        if (_disposed)
+        {
+            return 0;
+        }
+
+        var now = DateTime.UtcNow;
+
+        var fileIndices = files.Select(file =>
+        {
+            var index = FileIndex.CreateNew(file);
+            index.LastScanned = now;
+            return index;
+        }).ToList();
+
+        int rowsAffected = 0;
+
         try
         {
-            var fileIndex = FileIndex.CreateNew(file);
-
-            await _unitOfWork.BeginTransactionAsync();
-            await _unitOfWork.FileIndices.AddAsync(fileIndex);
-            await _unitOfWork.SaveChangesAsync();
-            return true;
+            rowsAffected = await _unitOfWork.FileIndices.UpsertAsync(fileIndices, cancellationToken);
         }
         catch (Exception ex)
         {
-            Logger.WriteLine($"Error indexing file: {ex.Message}");
-            return false;
+            Logger.Error($"Error indexing files: {ex.Message}");
+            throw;
         }
+
+        return rowsAffected;
     }
 
-    public async IAsyncEnumerable<FileInfo> SearchAsync(string searchTerm, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<FileInfo> SearchAsync(string search, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var list = await _unitOfWork.FileIndices.SearchAsync(searchTerm);
+        var list = await _unitOfWork.FileIndices.SearchAsync(search, cancellationToken);
+
         foreach (var fileIndex in list)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            _ = RefreshFileIndexAsync(fileIndex);
+            // 비동기적으로 파일 인덱스를 갱신합니다.
+            RefreshFileIndexAsync(fileIndex, cancellationToken).Forget();
 
-            var file = new FileInfo(fileIndex.FullPath);
+            var fullPath = Path.Combine(fileIndex.Directory, fileIndex.Name);
+            var file = new FileInfo(fullPath);
             if (file.Exists && !file.Attributes.HasFlag(FileAttributes.Directory))
             {
                 yield return file;
@@ -55,9 +80,10 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task RefreshFileIndexAsync(FileIndex fileIndex)
+    private async Task RefreshFileIndexAsync(FileIndex fileIndex, CancellationToken cancellationToken = default)
     {
-        var file = new FileInfo(fileIndex.FullPath);
+        var fullPath = Path.Combine(fileIndex.Directory, fileIndex.Name);
+        var file = new FileInfo(fullPath);
         if (file.Exists)
         {
             file.Refresh();
@@ -67,23 +93,26 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
                 file.Attributes != fileIndex.Attributes ||
                 file.Length != fileIndex.Size)
             {
-                await IndexFileAsync(file);
+                await IndexFileAsync(file, cancellationToken);
             }
         }
         else
         {
-            await _unitOfWork.FileIndices.DeleteAsync(fileIndex);
+            await _unitOfWork.FileIndices.DeleteAsync(fileIndex, cancellationToken);
         }
     }
 
     public async Task<bool> HasFileChangedAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
-        if (file.Exists == false)
+        if (!file.Exists)
         {
             return true;
         }
 
-        var indexedFile = await _unitOfWork.FileIndices.GetByFullPathAsync(file.FullName);
+        var directory = file.DirectoryName ?? string.Empty;
+        var name = file.Name;
+
+        var indexedFile = await _unitOfWork.FileIndices.GetByDirectoryAndNameAsync(directory, name, cancellationToken);
         if (indexedFile == null)
         {
             return true;
@@ -95,31 +124,46 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
             indexedFile.Attributes != file.Attributes;
     }
 
-    public Task<FileIndex?> GetIndexedFileInfoAsync(string fullPath, CancellationToken cancellationToken = default)
+    public Task<FileIndex?> GetIndexedFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        return _unitOfWork.FileIndices.GetByFullPathAsync(fullPath);
+        var directory = Path.GetDirectoryName(filePath) ?? string.Empty;
+        var name = Path.GetFileName(filePath);
+
+        return _unitOfWork.FileIndices.GetByDirectoryAndNameAsync(directory, name, cancellationToken);
     }
 
-    public async Task RemoveFileAsync(string fullPath, CancellationToken cancellationToken = default)
+    public async Task RemoveFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        await _unitOfWork.FileIndices.DeleteByPathAsync(fullPath);
+        var directory = Path.GetDirectoryName(filePath) ?? string.Empty;
+        var name = Path.GetFileName(filePath);
+
+        await _unitOfWork.FileIndices.DeleteByDirectoryAndNameAsync(directory, name, cancellationToken);
+    }
+    
+    public async Task RemoveDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
+    {
+        await _unitOfWork.FileIndices.DeleteByDirectoryAsync(directoryPath, cancellationToken);
     }
 
     public async Task<int> GetFileCountAsync(string path, CancellationToken cancellationToken = default)
     {
-        return await _unitOfWork.FileIndices.GetCountAsync(path);
+        return await _unitOfWork.FileIndices.GetCountAsync(path, cancellationToken);
     }
 
-    public async Task ClearDatabaseAsync(CancellationToken cancellationToken = default)
+    public async Task RemoveEntriesNotScannedAfterAsync(DateTime scanStartTime, CancellationToken cancellationToken = default)
     {
-        await _unitOfWork.FileIndices.ClearAsync();
+        await _unitOfWork.FileIndices.DeleteEntriesNotScannedAfterAsync(scanStartTime, cancellationToken);
     }
 
-    internal async Task TryIndexFileAsync(FileInfo fileInfo)
+    internal async Task TryIndexFileAsync(FileInfo fileInfo, CancellationToken cancellationToken = default)
     {
-        if (!fileInfo.Attributes.HasFlag(FileAttributes.Directory) && await HasFileChangedAsync(fileInfo))
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (fileInfo.Attributes.HasFlag(FileAttributes.Directory)) return;
+
+        if (await HasFileChangedAsync(fileInfo, cancellationToken))
         {
-            await IndexFileAsync(fileInfo);
+            await IndexFileAsync(fileInfo, cancellationToken);
         }
     }
 
@@ -140,20 +184,5 @@ internal class FileIndexer : IDisposable, IAsyncDisposable
         }
 
         _disposed = true;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (!_disposed)
-        {
-            Dispose(false);
-            await DisposeAsyncCore();
-            GC.SuppressFinalize(this);
-        }
-    }
-
-    protected virtual async ValueTask DisposeAsyncCore()
-    {
-        await _unitOfWork.DisposeAsync();
     }
 }

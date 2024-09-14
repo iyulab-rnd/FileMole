@@ -4,11 +4,11 @@ using FileMoles.Data;
 namespace FileMoles.Tracking;
 
 /// <summary>
-/// 인메모리에서 빠른응답성을 갖으며 DB I/O는 비동기적으로 수행합니다.
+/// In-memory, responsive, and DB I/O is done asynchronously.
 /// </summary>
-internal class InMemoryFileTrackingStore
+internal class InMemoryFileTrackingStore : IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<string, TrackingFile> _trackingFiles = new();
+    private readonly ConcurrentDictionary<string, TrackingFile> _trackingFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly IUnitOfWork _unitOfWork;
     private readonly ConcurrentQueue<Func<Task>> _databaseOperations = new();
     private readonly Task _databaseWorker;
@@ -40,10 +40,7 @@ internal class InMemoryFileTrackingStore
         _trackingFiles[trackingFile.FullPath] = trackingFile;
         EnqueueDatabaseOperation(async () =>
         {
-            await _unitOfWork.ExecuteInTransactionAsync(async (connection, ct) =>
-            {
-                await _unitOfWork.TrackingFiles.AddAsync(trackingFile);
-            });
+            await _unitOfWork.TrackingFiles.UpsertAsync(trackingFile);
         });
     }
 
@@ -53,22 +50,31 @@ internal class InMemoryFileTrackingStore
         {
             EnqueueDatabaseOperation(async () =>
             {
-                await _unitOfWork.ExecuteInTransactionAsync(async (connection, ct) =>
-                {
-                    await _unitOfWork.TrackingFiles.DeleteAsync(removedFile);
-                });
+                await _unitOfWork.TrackingFiles.DeleteAsync(removedFile);
             });
         }
     }
+    public bool IsTrackingFile(string fullPath) => _trackingFiles.ContainsKey(fullPath);
 
+    public IEnumerable<TrackingFile> GetAllTrackingFiles() => _trackingFiles.Values;
+
+    public IEnumerable<string> GetTrackedFilesInDirectory(string directoryPath)
+    {
+        return _trackingFiles.Values
+            .Where(tf => tf.FullPath.StartsWith(directoryPath, StringComparison.OrdinalIgnoreCase))
+            .Select(tf => tf.FullPath);
+    }
     private void EnqueueDatabaseOperation(Func<Task> operation)
     {
-        _databaseOperations.Enqueue(operation);
+        if (!_cts.IsCancellationRequested)
+        {
+            _databaseOperations.Enqueue(operation);
+        }
     }
 
     private async Task ProcessDatabaseOperationsAsync()
     {
-        while (!_cts.Token.IsCancellationRequested)
+        while (!_cts.Token.IsCancellationRequested || !_databaseOperations.IsEmpty)
         {
             if (_databaseOperations.TryDequeue(out var operation))
             {
@@ -87,17 +93,6 @@ internal class InMemoryFileTrackingStore
                 await Task.Delay(100); // Wait a bit before checking again
             }
         }
-    }
-
-    public bool IsTrackingFile(string fullPath) => _trackingFiles.ContainsKey(fullPath);
-
-    public IEnumerable<TrackingFile> GetAllTrackingFiles() => _trackingFiles.Values;
-
-    public IEnumerable<string> GetTrackedFilesInDirectory(string directoryPath)
-    {
-        return _trackingFiles.Values
-            .Where(tf => tf.FullPath.StartsWith(directoryPath, StringComparison.OrdinalIgnoreCase))
-            .Select(tf => tf.FullPath);
     }
 
     public async ValueTask DisposeAsync()

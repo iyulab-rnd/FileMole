@@ -34,10 +34,7 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
 
     public Task WatchDirectoryAsync(string path)
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(FileMoleFileSystemWatcher));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, nameof(FileMoleFileSystemWatcher));
 
         if (_watchers.ContainsKey(path))
         {
@@ -76,7 +73,7 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Logger.WriteLine($"Error processing created event: {ex.Message}");
+            Logger.Error($"Exception in OnCreated: {ex.Message}");
         }
     }
 
@@ -115,10 +112,13 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Logger.WriteLine($"Error processing changed event: {ex.Message}");
+            Logger.Error($"Error processing changed event: {ex.Message}");
         }
-
-        _processingTasks.TryRemove(fullPath, out _);
+        finally
+        {
+            // 완료된 태스크를 딕셔너리에서 제거하여 메모리 누수 방지
+            _processingTasks.TryRemove(fullPath, out _);
+        }
     }
 
     private async void OnDeleted(object sender, FileSystemEventArgs e)
@@ -130,6 +130,9 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
             if (Directory.Exists(e.FullPath))
             {
                 DirectoryDeleted?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Deleted, e.FullPath));
+
+                // 디렉토리 및 하위 항목 삭제
+                await _fileIndexer.RemoveDirectoryAsync(e.FullPath);
             }
             else
             {
@@ -138,7 +141,7 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Logger.WriteLine($"Error processing deleted event: {ex.Message}");
+            Logger.Error($"Error processing deleted event: {ex.Message}");
         }
     }
 
@@ -159,11 +162,11 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Logger.WriteLine($"Error processing renamed event: {ex.Message}");
+            Logger.Error($"Error processing renamed event: {ex.Message}");
         }
     }
 
-    private Task ProcessEventAsync(string fullPath, WatcherChangeTypes changeType, string? oldPath = null)
+    private async Task ProcessEventAsync(string fullPath, WatcherChangeTypes changeType, string? oldPath = null)
     {
         try
         {
@@ -171,9 +174,8 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
             {
                 FileDeleted?.Invoke(this, new FileSystemEvent(changeType, fullPath));
 
-                // 비동기적으로 인덱스를 수행합니다.
-                _ = _fileIndexer.RemoveFileAsync(fullPath);
-                return Task.CompletedTask;
+                await _fileIndexer.RemoveFileAsync(fullPath);
+                return;
             }
 
             if (changeType == WatcherChangeTypes.Renamed && oldPath != null)
@@ -183,16 +185,14 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
                 {
                     FileRenamed?.Invoke(this, new FileSystemEvent(changeType, fullPath, oldPath));
 
-                    // 비동기적으로 인덱스를 수행합니다.
-                    _ = _fileIndexer.RemoveFileAsync(oldPath);
-                    _ = _fileIndexer.IndexFileAsync(info);
+                    await _fileIndexer.RemoveFileAsync(oldPath);
+                    await _fileIndexer.IndexFileAsync(info);
                 }
                 else
                 {
-                    // 비동기적으로 인덱스를 수행합니다.
-                    _ = _fileIndexer.RemoveFileAsync(oldPath);
+                    await _fileIndexer.RemoveFileAsync(oldPath);
                 }
-                return Task.CompletedTask;
+                return;
             }
 
             var fileInfo = new FileInfo(fullPath);
@@ -207,16 +207,13 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
                     FileChanged?.Invoke(this, new FileSystemEvent(changeType, fullPath));
                 }
 
-                // 비동기적으로 인덱스를 수행합니다.
-                _ = _fileIndexer.TryIndexFileAsync(fileInfo);
+                await _fileIndexer.TryIndexFileAsync(fileInfo);
             }
         }
         catch (Exception ex)
         {
-            Logger.WriteLine($"Error processing event: {ex.Message}");
+            Logger.Error($"Error processing event: {ex.Message}");
         }
-
-        return Task.CompletedTask;
     }
 
     public Task UnwatchDirectoryAsync(string path)
@@ -304,7 +301,7 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
             catch (Exception ex)
             {
                 // 이미 종료된 태스크나 에러 발생 시 로깅
-                Logger.WriteLine($"Error during task completion: {ex.Message}");
+                Logger.Error($"Error during task completion: {ex.Message}");
             }
         }
 

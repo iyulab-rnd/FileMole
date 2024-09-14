@@ -42,12 +42,12 @@ public class FileMoleBuilder
     public FileMole Build()
     {
         var fileMole = new FileMole(_options,
-            ResolveUnitOfWork(),
+            ResolveUnitOfWorkAsync().Result,
             ResolveBackupManager());
         return fileMole;
     }
 
-    private IUnitOfWork ResolveUnitOfWork()
+    private async Task<IUnitOfWork> ResolveUnitOfWorkAsync()
     {
         var dataPath = _options.GetDataPath();
         var dbPath = Path.Combine(dataPath, Constants.DbFileName);
@@ -57,9 +57,9 @@ public class FileMoleBuilder
             Directory.CreateDirectory(dataPath);
         }
 
-        return new DbContext(dbPath);
+        var dbContext = await DbContext.CreateAsync(dbPath);
+        return dbContext;
     }
-
 
     private IFileBackupManager ResolveBackupManager()
     {

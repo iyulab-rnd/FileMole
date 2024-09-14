@@ -1,218 +1,226 @@
-﻿using FileMoles.Data;
+﻿using FileMoles;
+using FileMoles.Data;
+using Microsoft.Data.Sqlite;
+using System.Diagnostics;
 
 internal class FileIndexRepository : IRepository<FileIndex>
 {
     private readonly DbContext _unitOfWork;
 
     public static readonly string CreateTableSql = @"
-            CREATE TABLE IF NOT EXISTS FileIndex (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                Name TEXT NOT NULL,
-                FullPath TEXT NOT NULL UNIQUE,
-                Size INTEGER NOT NULL,
-                Created TEXT NOT NULL,
-                Modified TEXT NOT NULL,
-                Attributes INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_FileIndex_FullPath ON FileIndex(FullPath);";
+CREATE TABLE IF NOT EXISTS FileIndex (
+    Directory TEXT NOT NULL,
+    Name TEXT NOT NULL,
+    Size INTEGER NOT NULL,
+    Created TEXT NOT NULL,
+    Modified TEXT NOT NULL,
+    Attributes INTEGER NOT NULL,
+    LastScanned TEXT NOT NULL,
+    PRIMARY KEY (Directory, Name)
+);
+CREATE INDEX IF NOT EXISTS idx_FileIndex_Directory_Name ON FileIndex(Directory, Name);
+CREATE INDEX IF NOT EXISTS idx_FileIndex_Name ON FileIndex(Name);
+";
 
     public FileIndexRepository(DbContext unitOfWork)
     {
         _unitOfWork = unitOfWork;
     }
 
-    public async Task<FileIndex?> GetByIdAsync(int id)
+    public async Task<FileIndex?> GetByDirectoryAndNameAsync(string directory, string name, CancellationToken cancellationToken = default)
     {
-        var connection = await _unitOfWork.GetConnectionAsync();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT * FROM FileIndex WHERE Id = @Id";
-        command.Parameters.AddWithValue("@Id", id);
-
-        using var reader = await command.ExecuteReaderAsync();
-        if (await reader.ReadAsync())
+        return await _unitOfWork.ExecuteAsync(async connection =>
         {
-            return new FileIndex()
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM FileIndex WHERE Directory = @Directory AND Name = @Name";
+            command.Parameters.AddWithValue("@Directory", directory);
+            command.Parameters.AddWithValue("@Name", name);
+
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
             {
-                FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
-                Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                Name = reader.GetString(reader.GetOrdinal("Name")),
-                Size = reader.GetInt64(reader.GetOrdinal("Size")),
-                Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
-                Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
-                Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
-            };
-        }
+                return new FileIndex()
+                {
+                    Directory = reader.GetString(reader.GetOrdinal("Directory")),
+                    Name = reader.GetString(reader.GetOrdinal("Name")),
+                    Size = reader.GetInt64(reader.GetOrdinal("Size")),
+                    Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
+                    Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
+                    Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
+                };
+            }
 
-        return null;
+            return null;
+        }, cancellationToken);
     }
 
-    public async Task<FileIndex?> GetByFullPathAsync(string fullPath)
+    public async Task<int> UpsertAsync(FileIndex entity, CancellationToken cancellationToken = default)
     {
-        var connection = await _unitOfWork.GetConnectionAsync();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT * FROM FileIndex WHERE FullPath = @FullPath";
-        command.Parameters.AddWithValue("@FullPath", fullPath);
-
-        using var reader = await command.ExecuteReaderAsync();
-        if (await reader.ReadAsync())
-        {
-            return new FileIndex()
-            {
-                FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
-                Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                Name = reader.GetString(reader.GetOrdinal("Name")),
-                Size = reader.GetInt64(reader.GetOrdinal("Size")),
-                Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
-                Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
-                Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
-            };
-        }
-
-        return null;
-    }
-
-    public async Task<IEnumerable<FileIndex>> GetAllAsync()
-    {
-        var connection = await _unitOfWork.GetConnectionAsync();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT * FROM FileIndex";
-
-        var results = new List<FileIndex>();
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            results.Add(new FileIndex()
-            {
-                FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
-                Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                Name = reader.GetString(reader.GetOrdinal("Name")),
-                Size = reader.GetInt64(reader.GetOrdinal("Size")),
-                Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
-                Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
-                Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
-            });
-        }
-
-        return results;
-    }
-
-    public async Task<IEnumerable<FileIndex>> FindAsync(System.Linq.Expressions.Expression<Func<FileIndex, bool>> predicate)
-    {
-        // This method is not directly implementable with raw SQL.
-        // We'll implement a basic search functionality instead.
-        return await SearchAsync(predicate.ToString());
-    }
-
-    public async Task AddAsync(FileIndex entity)
-    {
-        await _unitOfWork.ExecuteInTransactionAsync(async (connection, ct) =>
+        return await _unitOfWork.ExecuteAsync(async connection =>
         {
             using var command = connection.CreateCommand();
             command.CommandText = @"
-                    INSERT INTO FileIndex 
-                    (Name, FullPath, Size, Created, Modified, Attributes) 
-                    VALUES (@Name, @FullPath, @Size, @Created, @Modified, @Attributes)";
+INSERT OR REPLACE INTO FileIndex 
+(Directory, Name, Size, Created, Modified, Attributes, LastScanned) 
+VALUES (@Directory, @Name, @Size, @Created, @Modified, @Attributes, @LastScanned)";
 
+            command.Parameters.AddWithValue("@Directory", entity.Directory);
             command.Parameters.AddWithValue("@Name", entity.Name);
-            command.Parameters.AddWithValue("@FullPath", entity.FullPath);
             command.Parameters.AddWithValue("@Size", entity.Size);
             command.Parameters.AddWithValue("@Created", entity.Created.ToString("o"));
             command.Parameters.AddWithValue("@Modified", entity.Modified.ToString("o"));
             command.Parameters.AddWithValue("@Attributes", (int)entity.Attributes);
+            command.Parameters.AddWithValue("@LastScanned", entity.LastScanned.ToString("o"));
 
-            await command.ExecuteNonQueryAsync(ct);
-        });
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }, cancellationToken);
     }
 
-    public async Task UpdateAsync(FileIndex entity)
+    public async Task<int> UpsertAsync(IEnumerable<FileIndex> entities, CancellationToken cancellationToken = default)
     {
-        await _unitOfWork.ExecuteInTransactionAsync(async (connection, ct) =>
+        return await _unitOfWork.ExecuteAsync(async connection =>
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+            int rowsAffected = 0;
+            try
+            {
+                using var command = connection.CreateCommand();
+
+                command.CommandText = @"
+INSERT OR REPLACE INTO FileIndex 
+(Directory, Name, Size, Created, Modified, Attributes, LastScanned) 
+VALUES (@Directory, @Name, @Size, @Created, @Modified, @Attributes, @LastScanned)";
+
+                var directoryParam = command.Parameters.Add("@Directory", SqliteType.Text);
+                var nameParam = command.Parameters.Add("@Name", SqliteType.Text);
+                var sizeParam = command.Parameters.Add("@Size", SqliteType.Integer);
+                var createdParam = command.Parameters.Add("@Created", SqliteType.Text);
+                var modifiedParam = command.Parameters.Add("@Modified", SqliteType.Text);
+                var attributesParam = command.Parameters.Add("@Attributes", SqliteType.Integer);
+                var lastScannedParam = command.Parameters.Add("@LastScanned", SqliteType.Text);
+
+                command.Prepare(); // Prepare the statement once
+
+                foreach (var entity in entities)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    directoryParam.Value = entity.Directory;
+                    nameParam.Value = entity.Name;
+                    sizeParam.Value = entity.Size;
+                    createdParam.Value = entity.Created.ToString("o");
+                    modifiedParam.Value = entity.Modified.ToString("o");
+                    attributesParam.Value = (int)entity.Attributes;
+                    lastScannedParam.Value = entity.LastScanned.ToString("o");
+
+                    rowsAffected += await command.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                Logger.Error($"Error during UpsertAsync: {ex.Message}");
+                throw;
+            }
+
+            return rowsAffected;
+        }, cancellationToken);
+    }
+
+    public async Task<int> DeleteAsync(FileIndex entity, CancellationToken cancellationToken = default)
+    {
+        return await _unitOfWork.ExecuteAsync(async connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM FileIndex WHERE Directory = @Directory AND Name = @Name";
+            command.Parameters.AddWithValue("@Directory", entity.Directory);
+            command.Parameters.AddWithValue("@Name", entity.Name);
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }, cancellationToken);
+    }
+
+    public async Task<int> DeleteByDirectoryAsync(string directory, CancellationToken cancellationToken = default)
+    {
+        return await _unitOfWork.ExecuteAsync(async connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM FileIndex WHERE Directory LIKE @Directory";
+            command.Parameters.AddWithValue("@Directory", $"{directory}%");
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }, cancellationToken);
+    }
+
+    public async Task<int> DeleteByDirectoryAndNameAsync(string directory, string name, CancellationToken cancellationToken = default)
+    {
+        return await _unitOfWork.ExecuteAsync(async connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM FileIndex WHERE Directory = @Directory AND Name = @Name";
+            command.Parameters.AddWithValue("@Directory", directory);
+            command.Parameters.AddWithValue("@Name", name);
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }, cancellationToken);
+    }
+
+    public async Task<int> DeleteEntriesNotScannedAfterAsync(DateTime scanStartTime, CancellationToken cancellationToken = default)
+    {
+        return await _unitOfWork.ExecuteAsync(async connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM FileIndex WHERE LastScanned < @ScanStartTime";
+            command.Parameters.AddWithValue("@ScanStartTime", scanStartTime.ToString("o"));
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }, cancellationToken);
+    }
+
+    public async Task<List<FileIndex>> SearchAsync(string search, CancellationToken cancellationToken = default)
+    {
+        return await _unitOfWork.ExecuteAsync(async connection =>
         {
             using var command = connection.CreateCommand();
             command.CommandText = @"
-                    UPDATE FileIndex 
-                    SET Name = @Name, Size = @Size, Created = @Created, Modified = @Modified, Attributes = @Attributes
-                    WHERE FullPath = @FullPath";
+            SELECT * FROM FileIndex 
+            WHERE (Directory || '/' || Name) LIKE @Search";
+            command.Parameters.AddWithValue("@Search", $"%{search}%");
 
-            command.Parameters.AddWithValue("@Name", entity.Name);
-            command.Parameters.AddWithValue("@FullPath", entity.FullPath);
-            command.Parameters.AddWithValue("@Size", entity.Size);
-            command.Parameters.AddWithValue("@Created", entity.Created.ToString("o"));
-            command.Parameters.AddWithValue("@Modified", entity.Modified.ToString("o"));
-            command.Parameters.AddWithValue("@Attributes", (int)entity.Attributes);
-
-            await command.ExecuteNonQueryAsync(ct);
-        });
-    }
-
-    public Task DeleteAsync(FileIndex entity)
-    {
-        return DeleteByPathAsync(entity.FullPath);
-    }
-
-    public async Task DeleteByPathAsync(string fullPath)
-    {
-        await _unitOfWork.ExecuteInTransactionAsync(async (connection, ct) =>
-        {
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM FileIndex WHERE FullPath = @FullPath";
-            command.Parameters.AddWithValue("@FullPath", fullPath);
-            await command.ExecuteNonQueryAsync(ct);
-        });
-    }
-
-    public async Task<List<FileIndex>> SearchAsync(string searchTerm)
-    {
-        var connection = await _unitOfWork.GetConnectionAsync();
-        using var command = connection.CreateCommand();
-        command.CommandText = @"
-                SELECT * FROM FileIndex 
-                WHERE FullPath LIKE @SearchTerm";
-        command.Parameters.AddWithValue("@SearchTerm", $"%{searchTerm}%");
-
-        var list = new List<FileIndex>();
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            list.Add(new FileIndex()
+            var list = new List<FileIndex>();
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
             {
-                FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
-                Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                Name = reader.GetString(reader.GetOrdinal("Name")),
-                Size = reader.GetInt64(reader.GetOrdinal("Size")),
-                Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
-                Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
-                Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
-            });
-        }
-        return list;
+                list.Add(new FileIndex()
+                {
+                    Directory = reader.GetString(reader.GetOrdinal("Directory")),
+                    Name = reader.GetString(reader.GetOrdinal("Name")),
+                    Size = reader.GetInt64(reader.GetOrdinal("Size")),
+                    Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
+                    Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
+                    Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
+                });
+            }
+            return list;
+        }, cancellationToken);
     }
 
-    public async Task<int> GetCountAsync(string path)
+    public async Task<int> GetCountAsync(string path, CancellationToken cancellationToken = default)
     {
-        var connection = await _unitOfWork.GetConnectionAsync();
-        using var command = connection.CreateCommand();
-
-        bool isDrive = path.EndsWith(':') || path.EndsWith(":/") || path.EndsWith(@":\");
-        string queryPath = isDrive ? $"{path}%" : $"{path.TrimEnd('/', '\\')}%";
-
-        command.CommandText = @"
-                SELECT COUNT(*)
-                FROM FileIndex
-                WHERE FullPath LIKE @Path";
-        command.Parameters.AddWithValue("@Path", queryPath);
-
-        var result = await command.ExecuteScalarAsync();
-        return Convert.ToInt32(result);
-    }
-
-    public async Task ClearAsync()
-    {
-        await _unitOfWork.ExecuteInTransactionAsync(async (connection, ct) =>
+        return await _unitOfWork.ExecuteAsync(async connection =>
         {
             using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM FileIndex";
-            await command.ExecuteNonQueryAsync(ct);
-        });
+
+            string queryPath = path.TrimEnd('/', '\\');
+            queryPath = $"{queryPath}%";
+
+            command.CommandText = @"
+            SELECT COUNT(*)
+            FROM FileIndex
+            WHERE Directory LIKE @Path";
+            command.Parameters.AddWithValue("@Path", queryPath);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return Convert.ToInt32(result);
+        }, cancellationToken);
     }
 }

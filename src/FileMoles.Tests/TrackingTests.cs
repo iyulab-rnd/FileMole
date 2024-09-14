@@ -1,6 +1,4 @@
-﻿using System.Threading.Tasks;
-using Xunit;
-using Xunit.Abstractions;
+﻿using Xunit.Abstractions;
 
 namespace FileMoles.Tests;
 
@@ -31,7 +29,7 @@ public class TrackingTests : TestBase
         var filePath = await CreateUniqueFileAsync();
 
         await FileMole.Tracking.EnableAsync(TestPath);
-        await FileMole.Tracking.WaitForInitialScanCompletionAsync();
+        await FileMole.Tracking.WaitForReadyAsync();
 
         var contentChanged = false;
         FileMole.FileContentChanged += (sender, e) => contentChanged = true;
