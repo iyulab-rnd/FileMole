@@ -1,7 +1,7 @@
 ﻿using FileMoles;
 using FileMoles.Data;
 using Microsoft.Data.Sqlite;
-using System.Diagnostics;
+using System.Text;
 
 internal class FileIndexRepository : IRepository<FileIndex>
 {
@@ -12,19 +12,33 @@ CREATE TABLE IF NOT EXISTS FileIndex (
     Directory TEXT NOT NULL,
     Name TEXT NOT NULL,
     Size INTEGER NOT NULL,
-    Created TEXT NOT NULL,
-    Modified TEXT NOT NULL,
+    Created INTEGER NOT NULL,
+    Modified INTEGER NOT NULL,
     Attributes INTEGER NOT NULL,
-    LastScanned TEXT NOT NULL,
+    LastScanned INTEGER NOT NULL,
     PRIMARY KEY (Directory, Name)
 );
-CREATE INDEX IF NOT EXISTS idx_FileIndex_Directory_Name ON FileIndex(Directory, Name);
-CREATE INDEX IF NOT EXISTS idx_FileIndex_Name ON FileIndex(Name);
+
+CREATE INDEX IF NOT EXISTS idx_FileIndex_Directory ON FileIndex(Directory);
 ";
 
     public FileIndexRepository(DbContext unitOfWork)
     {
         _unitOfWork = unitOfWork;
+    }
+
+    private FileIndex BuildFileIndex(SqliteDataReader reader)
+    {
+        return new FileIndex()
+        {
+            Directory = reader.GetString(reader.GetOrdinal("Directory")),
+            Name = reader.GetString(reader.GetOrdinal("Name")),
+            Size = reader.GetInt64(reader.GetOrdinal("Size")),
+            Created = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("Created"))).UtcDateTime,
+            Modified = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("Modified"))).UtcDateTime,
+            Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes")),
+            LastScanned = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastScanned"))).UtcDateTime
+        };
     }
 
     public async Task<FileIndex?> GetByDirectoryAndNameAsync(string directory, string name, CancellationToken cancellationToken = default)
@@ -39,18 +53,28 @@ CREATE INDEX IF NOT EXISTS idx_FileIndex_Name ON FileIndex(Name);
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (await reader.ReadAsync(cancellationToken))
             {
-                return new FileIndex()
-                {
-                    Directory = reader.GetString(reader.GetOrdinal("Directory")),
-                    Name = reader.GetString(reader.GetOrdinal("Name")),
-                    Size = reader.GetInt64(reader.GetOrdinal("Size")),
-                    Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
-                    Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
-                    Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
-                };
+                return BuildFileIndex(reader);
             }
 
             return null;
+        }, cancellationToken);
+    }
+
+    public async Task<List<FileIndex>> GetByDirectoryAsync(string directory, CancellationToken cancellationToken = default)
+    {
+        return await _unitOfWork.ExecuteAsync(async connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM FileIndex WHERE Directory = @Directory";
+            command.Parameters.AddWithValue("@Directory", directory);
+
+            var list = new List<FileIndex>();
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                list.Add(BuildFileIndex(reader));
+            }
+            return list;
         }, cancellationToken);
     }
 
@@ -67,10 +91,10 @@ VALUES (@Directory, @Name, @Size, @Created, @Modified, @Attributes, @LastScanned
             command.Parameters.AddWithValue("@Directory", entity.Directory);
             command.Parameters.AddWithValue("@Name", entity.Name);
             command.Parameters.AddWithValue("@Size", entity.Size);
-            command.Parameters.AddWithValue("@Created", entity.Created.ToString("o"));
-            command.Parameters.AddWithValue("@Modified", entity.Modified.ToString("o"));
+            command.Parameters.AddWithValue("@Created", new DateTimeOffset(entity.Created).ToUnixTimeSeconds());
+            command.Parameters.AddWithValue("@Modified", new DateTimeOffset(entity.Modified).ToUnixTimeSeconds());
             command.Parameters.AddWithValue("@Attributes", (int)entity.Attributes);
-            command.Parameters.AddWithValue("@LastScanned", entity.LastScanned.ToString("o"));
+            command.Parameters.AddWithValue("@LastScanned", new DateTimeOffset(entity.LastScanned).ToUnixTimeSeconds());
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }, cancellationToken);
@@ -109,10 +133,10 @@ VALUES (@Directory, @Name, @Size, @Created, @Modified, @Attributes, @LastScanned
                     directoryParam.Value = entity.Directory;
                     nameParam.Value = entity.Name;
                     sizeParam.Value = entity.Size;
-                    createdParam.Value = entity.Created.ToString("o");
-                    modifiedParam.Value = entity.Modified.ToString("o");
+                    createdParam.Value = new DateTimeOffset(entity.Created).ToUnixTimeSeconds();
+                    modifiedParam.Value = new DateTimeOffset(entity.Modified).ToUnixTimeSeconds();
                     attributesParam.Value = (int)entity.Attributes;
-                    lastScannedParam.Value = entity.LastScanned.ToString("o");
+                    lastScannedParam.Value = new DateTimeOffset(entity.LastScanned).ToUnixTimeSeconds();
 
                     rowsAffected += await command.ExecuteNonQueryAsync(cancellationToken);
                 }
@@ -127,6 +151,46 @@ VALUES (@Directory, @Name, @Size, @Created, @Modified, @Attributes, @LastScanned
             }
 
             return rowsAffected;
+        }, cancellationToken);
+    }
+
+    public async Task UpdateLastScannedAsync(IEnumerable<FileIndex> fileIndices, CancellationToken cancellationToken = default)
+    {
+        const int batchSize = 1000;
+        var batches = fileIndices.Chunk(batchSize);
+
+        await _unitOfWork.ExecuteAsync(async connection =>
+        {
+            foreach (var batch in batches)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var queryBuilder = new StringBuilder();
+                queryBuilder.AppendLine("BEGIN;");
+
+                foreach (var (fileIndex, index) in batch.Select((f, i) => (f, i)))
+                {
+                    queryBuilder.AppendLine($@"
+                    UPDATE FileIndex 
+                    SET LastScanned = @LastScanned{index}
+                    WHERE Directory = @Directory{index} AND Name = @Name{index};");
+                }
+
+                queryBuilder.AppendLine("COMMIT;");
+
+                using var command = connection.CreateCommand();
+                command.CommandText = queryBuilder.ToString();
+
+                for (int i = 0; i < batch.Length; i++)
+                {
+                    var fileIndex = batch[i];
+                    command.Parameters.AddWithValue($"@LastScanned{i}", new DateTimeOffset(fileIndex.LastScanned).ToUnixTimeSeconds());
+                    command.Parameters.AddWithValue($"@Directory{i}", fileIndex.Directory);
+                    command.Parameters.AddWithValue($"@Name{i}", fileIndex.Name);
+                }
+
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
         }, cancellationToken);
     }
 
@@ -171,7 +235,7 @@ VALUES (@Directory, @Name, @Size, @Created, @Modified, @Attributes, @LastScanned
         {
             using var command = connection.CreateCommand();
             command.CommandText = "DELETE FROM FileIndex WHERE LastScanned < @ScanStartTime";
-            command.Parameters.AddWithValue("@ScanStartTime", scanStartTime.ToString("o"));
+            command.Parameters.AddWithValue("@ScanStartTime", new DateTimeOffset(scanStartTime).ToUnixTimeSeconds());
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }, cancellationToken);
     }
@@ -190,15 +254,7 @@ VALUES (@Directory, @Name, @Size, @Created, @Modified, @Attributes, @LastScanned
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                list.Add(new FileIndex()
-                {
-                    Directory = reader.GetString(reader.GetOrdinal("Directory")),
-                    Name = reader.GetString(reader.GetOrdinal("Name")),
-                    Size = reader.GetInt64(reader.GetOrdinal("Size")),
-                    Created = DateTime.Parse(reader.GetString(reader.GetOrdinal("Created"))),
-                    Modified = DateTime.Parse(reader.GetString(reader.GetOrdinal("Modified"))),
-                    Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("Attributes"))
-                });
+                list.Add(BuildFileIndex(reader));
             }
             return list;
         }, cancellationToken);

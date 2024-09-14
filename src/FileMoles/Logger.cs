@@ -19,7 +19,7 @@ public class Logger
 #if DEBUG
         message ??= ex.Message;
         Debug.WriteLine(message);
-        Debugger.Break();
+        //Debugger.Break();
 #endif
     }
 }

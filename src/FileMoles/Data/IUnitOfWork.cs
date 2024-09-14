@@ -15,4 +15,5 @@ internal interface IUnitOfWork : IDisposable
 
     Task<TResult> ExecuteAsync<TResult>(Func<SqliteConnection, Task<TResult>> func, CancellationToken cancellationToken = default);
     Task ExecuteAsync(Func<SqliteConnection, Task> func, CancellationToken cancellationToken = default);
+    Task OptimizeAsync(CancellationToken cancellationToken);
 }

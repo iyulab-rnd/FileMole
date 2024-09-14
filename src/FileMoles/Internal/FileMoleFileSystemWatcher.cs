@@ -79,8 +79,6 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
 
     private void OnChanged(object sender, FileSystemEventArgs e)
     {
-        if (_ignoreManager.ShouldIgnore(e.FullPath)) return;
-
         var now = DateTime.UtcNow;
         _lastEventTime[e.FullPath] = now;
 
@@ -98,6 +96,8 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
         await Task.Delay(_debouncePeriod);
 
         if (_lastEventTime.TryGetValue(fullPath, out var lastTime) && lastTime != eventTime) return;
+
+        if (_ignoreManager.ShouldIgnore(fullPath)) return;
 
         try
         {

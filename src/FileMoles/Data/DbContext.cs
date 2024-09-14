@@ -1,10 +1,9 @@
 ﻿using Microsoft.Data.Sqlite;
 using System.Data;
-using System.Threading;
 
 namespace FileMoles.Data;
 
-internal class DbContext : IUnitOfWork
+internal class DbContext : IUnitOfWork, IDisposable
 {
     private readonly string _connectionString;
     private bool _disposed;
@@ -15,7 +14,13 @@ internal class DbContext : IUnitOfWork
 
     private DbContext(string dbPath)
     {
-        _connectionString = $"Data Source={dbPath};Mode=ReadWriteCreate;";
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared,
+            Pooling = true,
+        }.ToString();
 
         FileIndices = new FileIndexRepository(this);
         TrackingFiles = new TrackingFileRepository(this);
@@ -30,12 +35,26 @@ internal class DbContext : IUnitOfWork
 
     private async Task InitializeAsync()
     {
+        // WAL 모드 설정 및 기타 PRAGMA 설정
+        await ExecuteAsync(async connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = NORMAL;
+                PRAGMA temp_store = MEMORY;
+                PRAGMA mmap_size = 30000000000;
+                PRAGMA page_size = 32768;";
+            await command.ExecuteNonQueryAsync();
+        });
+
+        // 테이블 생성
         await ExecuteAsync(async connection =>
         {
             using var command = connection.CreateCommand();
             command.CommandText = $@"
-                    {FileIndexRepository.CreateTableSql}
-                    {TrackingFileRepository.CreateTableSql}";
+                {FileIndexRepository.CreateTableSql}
+                {TrackingFileRepository.CreateTableSql}";
             await command.ExecuteNonQueryAsync();
         });
     }
@@ -44,9 +63,8 @@ internal class DbContext : IUnitOfWork
     {
         ObjectDisposedException.ThrowIf(_disposed, nameof(DbContext));
 
-        await using var connection = new SqliteConnection(_connectionString);
+        using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-
         return await func(connection);
     }
 
@@ -54,10 +72,19 @@ internal class DbContext : IUnitOfWork
     {
         ObjectDisposedException.ThrowIf(_disposed, nameof(DbContext));
 
-        await using var connection = new SqliteConnection(_connectionString);
+        using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-
         await func(connection);
+    }
+
+    public async Task OptimizeAsync(CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(async connection =>
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "VACUUM;";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }, cancellationToken);
     }
 
     protected virtual void Dispose(bool disposing)
@@ -75,11 +102,6 @@ internal class DbContext : IUnitOfWork
 
     public void Dispose()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
         Dispose(true);
         GC.SuppressFinalize(this);
     }

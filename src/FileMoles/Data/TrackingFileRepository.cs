@@ -11,7 +11,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
             FullPath TEXT PRIMARY KEY,
             Hash TEXT NOT NULL UNIQUE,
             IsDirectory INTEGER NOT NULL,
-            LastTrackedTime TEXT NOT NULL
+            LastTrackedTime INTEGER NOT NULL
         );";
 
     public TrackingFileRepository(DbContext unitOfWork)
@@ -35,7 +35,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
                     FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
                     IsDirectory = reader.GetBoolean(reader.GetOrdinal("IsDirectory")),
                     Hash = reader.GetString(reader.GetOrdinal("Hash")),
-                    LastTrackedTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastTrackedTime")))
+                    LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
                 });
             }
 
@@ -56,7 +56,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
             command.Parameters.AddWithValue("@FullPath", entity.FullPath);
             command.Parameters.AddWithValue("@Hash", entity.Hash);
             command.Parameters.AddWithValue("@IsDirectory", entity.IsDirectory ? 1 : 0);
-            command.Parameters.AddWithValue("@LastTrackedTime", entity.LastTrackedTime.ToString("o"));
+            command.Parameters.AddWithValue("@LastTrackedTime", new DateTimeOffset(entity.LastTrackedTime).ToUnixTimeSeconds());
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }, cancellationToken);
@@ -79,7 +79,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
         {
             using var command = connection.CreateCommand();
             command.CommandText = "UPDATE TrackingFile SET LastTrackedTime = @LastTrackedTime WHERE FullPath = @FullPath";
-            command.Parameters.AddWithValue("@LastTrackedTime", lastTrackedTime.ToString("o"));
+            command.Parameters.AddWithValue("@LastTrackedTime", new DateTimeOffset(lastTrackedTime).ToUnixTimeSeconds());
             command.Parameters.AddWithValue("@FullPath", fullPath);
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }, cancellationToken);
@@ -106,7 +106,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
                     FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
                     IsDirectory = reader.GetBoolean(reader.GetOrdinal("IsDirectory")),
                     Hash = reader.GetString(reader.GetOrdinal("Hash")),
-                    LastTrackedTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastTrackedTime")))
+                    LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
                 });
             }
             return list;
@@ -129,7 +129,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
                     FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
                     IsDirectory = reader.GetBoolean(reader.GetOrdinal("IsDirectory")),
                     Hash = reader.GetString(reader.GetOrdinal("Hash")),
-                    LastTrackedTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastTrackedTime")))
+                    LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
                 };
             }
 
@@ -153,7 +153,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
                     FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
                     IsDirectory = reader.GetBoolean(reader.GetOrdinal("IsDirectory")),
                     Hash = reader.GetString(reader.GetOrdinal("Hash")),
-                    LastTrackedTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("LastTrackedTime")))
+                    LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
                 };
             }
 

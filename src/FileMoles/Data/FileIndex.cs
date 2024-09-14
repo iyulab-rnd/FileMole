@@ -17,10 +17,21 @@ internal class FileIndex
             Directory = file.Directory!.FullName,
             Name = file.Name,
             Size = file.Length,
-            Created = file.CreationTime,
-            Modified = file.LastWriteTime,
+            Created = file.CreationTimeUtc,
+            Modified = file.LastWriteTimeUtc,
             Attributes = file.Attributes,
             LastScanned = DateTime.UtcNow
         };
+    }
+
+    internal bool IsChanged(FileInfo file)
+    {
+        const double SizeThreshold = 1.0; // 바이트 단위
+        const double TimeThreshold = 1.0; // 초 단위
+
+        return Math.Abs(this.Size - file.Length) > SizeThreshold ||
+              Math.Abs((this.Created - file.CreationTimeUtc).TotalSeconds) > TimeThreshold ||
+              Math.Abs((this.Modified - file.LastWriteTimeUtc).TotalSeconds) > TimeThreshold ||
+              this.Attributes != file.Attributes;
     }
 }

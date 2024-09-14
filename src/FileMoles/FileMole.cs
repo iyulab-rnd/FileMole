@@ -5,6 +5,7 @@ using FileMoles.Data;
 using FileMoles.Interfaces;
 using FileMoles.Tracking;
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
 
 namespace FileMoles;
 
@@ -13,11 +14,12 @@ public class FileMole : IDisposable, IAsyncDisposable
     private bool _disposed;
 
     private readonly FileMoleOptions _options;
-
+    private readonly IUnitOfWork _unitOfWork;
     private readonly FileIndexer _fileIndexer;
     private readonly FileMoleFileSystemWatcher _fileSystemWatcher;
     private readonly Dictionary<string, IStorageProvider> _storageProviders;
     private readonly CancellationTokenSource _cts = new();
+    private readonly InitialScanner _initialScanner;
     private readonly Task _initializationTask;
 
     public TrackingManager Tracking { get; }
@@ -42,13 +44,14 @@ public class FileMole : IDisposable, IAsyncDisposable
         IFileBackupManager backupManager)
     {
         _options = options;
+        _unitOfWork = unitOfWork;
 
         var dataPath = options.GetDataPath();
         var ignoreManager = new FileIgnoreManager(dataPath);
 
         _fileIndexer = new FileIndexer(unitOfWork);
         _fileSystemWatcher = new FileMoleFileSystemWatcher(_fileIndexer, ignoreManager);
-        _storageProviders = new Dictionary<string, IStorageProvider>();
+        _storageProviders = [];
 
         Tracking = new TrackingManager();
         Tracking.Init(new InternalTrackingManager(
@@ -60,6 +63,8 @@ public class FileMole : IDisposable, IAsyncDisposable
 
         InitializeStorageProviders();
         InitializeFileWatcher();
+
+        _initialScanner = new InitialScanner(unitOfWork, _fileIndexer, _storageProviders);
 
         _initializationTask = InitializeAsync(_cts.Token);
     }
@@ -91,69 +96,24 @@ public class FileMole : IDisposable, IAsyncDisposable
         }
     }
 
-    private Task InitializeAsync(CancellationToken cancellationToken)
+    private async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        return Task.Run(async () =>
+        await _unitOfWork.OptimizeAsync(cancellationToken);
+
+        // 비동기적으로 실행
+        _ = Task.Run(async () =>
         {
+            var sw = Stopwatch.StartNew();
             _ = Tracking.ReadyAsync(cancellationToken);
 
-            var scanStartTime = DateTime.UtcNow;
+            await _initialScanner.ScanAsync(_options.Moles.Select(m => m.Path), cancellationToken);
 
-            var scanTasks = _options.Moles.Select(mole => ScanDirectoryAsync(mole.Path, cancellationToken));
-            await Task.WhenAll(scanTasks);
-
-            // After scanning, remove any entries not updated during the scan
-            await _fileIndexer.RemoveEntriesNotScannedAfterAsync(scanStartTime, cancellationToken);
+            sw.Stop();
+            Logger.Info($"Initial scan completed in {sw.Elapsed:G}");
 
             IsInitialScanComplete = true;
             InitialScanCompleted?.Invoke(this, EventArgs.Empty);
         }, cancellationToken);
-    }
-
-    private async Task ScanDirectoryAsync(string path, CancellationToken cancellationToken)
-    {
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var storageProvider = GetStorageProviderForPath(path)
-                ?? throw new ArgumentException($"No storage provider found for path: {path}");
-
-            // Get list of files on disk
-            var filesOnDisk = new List<FileInfo>();
-            await foreach (var file in storageProvider.GetFilesAsync(path).WithCancellation(cancellationToken))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                if (IOHelper.IsHidden(file.FullName)) continue;
-                filesOnDisk.Add(file);
-            }
-
-            // Upsert all files on disk
-            if (filesOnDisk.Count > 0)
-            {
-                await _fileIndexer.IndexFilesAsync(filesOnDisk, cancellationToken);
-            }
-
-            // Recursively scan subdirectories
-            await foreach (var directory in storageProvider.GetDirectoriesAsync(path).WithCancellation(cancellationToken))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                if (IOHelper.IsHidden(directory.FullName)) continue;
-
-                await ScanDirectoryAsync(directory.FullName, cancellationToken);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // 작업이 취소되었으므로 추가 처리가 필요 없습니다.
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, $"Error scanning directory: {path}");
-        }
     }
 
     private void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
@@ -232,7 +192,9 @@ public class FileMole : IDisposable, IAsyncDisposable
         var provider = GetStorageProviderForPath(filePath);
         if (provider != null)
         {
-            return await provider.GetFileAsync(filePath);
+            var file = await provider.GetFileAsync(filePath);
+            _ = _fileIndexer.TryIndexFileAsync(file);
+            return file;
         }
         else
         {
@@ -240,12 +202,16 @@ public class FileMole : IDisposable, IAsyncDisposable
         }
     }
 
-    public IAsyncEnumerable<FileInfo> GetFilesAsync(string path)
+    public async IAsyncEnumerable<FileInfo> GetFilesAsync(string path)
     {
         var provider = GetStorageProviderForPath(path);
         if (provider != null)
         {
-            return provider.GetFilesAsync(path);
+            await foreach(var file in provider.GetFilesAsync(path))
+            {
+                _ = _fileIndexer.TryIndexFileAsync(file);
+                yield return file;
+            }
         }
         else
         {
@@ -281,9 +247,13 @@ public class FileMole : IDisposable, IAsyncDisposable
 
     public async Task RemoveMoleAsync(string path)
     {
-        _options.Moles.RemoveAll(m => m.Path == path);
-        _storageProviders.Remove(path);
-        await _fileSystemWatcher.UnwatchDirectoryAsync(path);
+        var mole = _options.Moles.FirstOrDefault(p => p.Path == path);
+        if (mole != null)
+        {
+            _options.Moles.Remove(mole);
+            _storageProviders.Remove(path);
+            await _fileSystemWatcher.UnwatchDirectoryAsync(path);
+        }
     }
 
     public IReadOnlyList<Mole> GetMoles()

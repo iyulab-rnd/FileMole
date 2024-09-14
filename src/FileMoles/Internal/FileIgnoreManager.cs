@@ -1,6 +1,4 @@
 ﻿using GlobExpressions;
-using System.Diagnostics;
-using System.Text;
 
 namespace FileMoles.Internal;
 
@@ -131,7 +129,7 @@ packages/
 
 # Database
 *.db
-*.db-journal
+*.db-*
 *.sqlite
 *.sqlite3
 *.mdf

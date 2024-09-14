@@ -4,15 +4,10 @@ using System.Runtime.CompilerServices;
 
 namespace FileMoles.Indexing;
 
-internal class FileIndexer : IDisposable
+internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
 {
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly IUnitOfWork _unitOfWork = unitOfWork;
     private bool _disposed;
-
-    public FileIndexer(IUnitOfWork unitOfWork)
-    {
-        _unitOfWork = unitOfWork;
-    }
 
     public async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
@@ -27,37 +22,6 @@ internal class FileIndexer : IDisposable
         var fileIndex = FileIndex.CreateNew(file);
         await _unitOfWork.FileIndices.UpsertAsync(fileIndex, cancellationToken);
         return true;
-    }
-
-    public async Task<int> IndexFilesAsync(IEnumerable<FileInfo> files, CancellationToken cancellationToken = default)
-    {
-        if (_disposed)
-        {
-            return 0;
-        }
-
-        var now = DateTime.UtcNow;
-
-        var fileIndices = files.Select(file =>
-        {
-            var index = FileIndex.CreateNew(file);
-            index.LastScanned = now;
-            return index;
-        }).ToList();
-
-        int rowsAffected = 0;
-
-        try
-        {
-            rowsAffected = await _unitOfWork.FileIndices.UpsertAsync(fileIndices, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"Error indexing files: {ex.Message}");
-            throw;
-        }
-
-        return rowsAffected;
     }
 
     public async IAsyncEnumerable<FileInfo> SearchAsync(string search, [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -88,10 +52,7 @@ internal class FileIndexer : IDisposable
         {
             file.Refresh();
 
-            if (file.CreationTime != fileIndex.Created ||
-                file.LastWriteTime != fileIndex.Modified ||
-                file.Attributes != fileIndex.Attributes ||
-                file.Length != fileIndex.Size)
+            if (fileIndex.IsChanged(file))
             {
                 await IndexFileAsync(file, cancellationToken);
             }
@@ -118,18 +79,25 @@ internal class FileIndexer : IDisposable
             return true;
         }
 
-        return indexedFile.Size != file.Length ||
-            indexedFile.Created != file.CreationTime ||
-            indexedFile.Modified != file.LastWriteTime ||
-            indexedFile.Attributes != file.Attributes;
+        return indexedFile.IsChanged(file);
     }
 
-    public Task<FileIndex?> GetIndexedFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<List<FileIndex>> GetFileIndicesByDirectoryAsync(string directory, CancellationToken cancellationToken)
     {
-        var directory = Path.GetDirectoryName(filePath) ?? string.Empty;
-        var name = Path.GetFileName(filePath);
+        return await _unitOfWork.FileIndices.GetByDirectoryAsync(directory, cancellationToken);
+    }
 
-        return _unitOfWork.FileIndices.GetByDirectoryAndNameAsync(directory, name, cancellationToken);
+    public async Task UpsertFileIndicesAsync(List<FileIndex> fileIndices, CancellationToken cancellationToken)
+    {
+        await _unitOfWork.FileIndices.UpsertAsync(fileIndices, cancellationToken);
+    }
+
+    public async Task DeleteFileIndicesAsync(List<FileIndex> fileIndices, CancellationToken cancellationToken)
+    {
+        foreach (var fileIndex in fileIndices)
+        {
+            await _unitOfWork.FileIndices.DeleteAsync(fileIndex, cancellationToken);
+        }
     }
 
     public async Task RemoveFileAsync(string filePath, CancellationToken cancellationToken = default)
@@ -165,6 +133,11 @@ internal class FileIndexer : IDisposable
         {
             await IndexFileAsync(fileInfo, cancellationToken);
         }
+    }
+
+    internal async Task UpdateLastScannedAsync(IEnumerable<FileIndex> fileIndices, CancellationToken cancellationToken = default)
+    {
+        await _unitOfWork.FileIndices.UpdateLastScannedAsync(fileIndices, cancellationToken);
     }
 
     public void Dispose()
