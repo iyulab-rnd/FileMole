@@ -18,15 +18,15 @@ public class FeatureTests : TestBase
             changed++;
         };
 
-        await FileMole.Tracking.EnableAsync(TestPath);
-        await Task.Delay(TimeSpan.FromSeconds(1));
-
         // Arrange
-        var file = Path.Combine(TestPath, "test.txt");
-        File.WriteAllText(file, "Hello, World!");
+        var testFile = Path.Combine(TestPath, "test.txt");
+        File.WriteAllText(testFile, "Hello, World! First");
+        await FileMole.Tracking.EnableAsync(testFile);
+
+        File.WriteAllText(testFile, "Hello, World! Changed 1");
         await Task.Delay(TimeSpan.FromSeconds(2));
 
-        File.WriteAllText(file, "Hello, World! Changed");
+        File.WriteAllText(testFile, "Hello, World! Changed 2");
         await Task.Delay(TimeSpan.FromSeconds(2));
 
         // Assert

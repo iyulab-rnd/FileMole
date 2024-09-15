@@ -4,7 +4,6 @@ using FileMoles.Internal;
 using FileMoles.Data;
 using FileMoles.Interfaces;
 using FileMoles.Tracking;
-using System.Runtime.CompilerServices;
 using System.Diagnostics;
 
 namespace FileMoles;
@@ -55,7 +54,6 @@ public class FileMole : IDisposable, IAsyncDisposable
 
         Tracking = new TrackingManager();
         Tracking.Init(new InternalTrackingManager(
-            ignoreManager,
             options.DebounceTime,
             OnFileContentChanged,
             unitOfWork,
@@ -116,7 +114,7 @@ public class FileMole : IDisposable, IAsyncDisposable
         }, cancellationToken);
     }
 
-    private void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
+    private static void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
     {
         raiseEvent(e);
     }
@@ -263,12 +261,7 @@ public class FileMole : IDisposable, IAsyncDisposable
 
     public async Task<long> GetTotalSizeAsync(string path)
     {
-        long totalSize = 0;
-        await foreach (var file in GetFilesAsync(path))
-        {
-            totalSize += file.Length;
-        }
-        return totalSize;
+        return await _fileIndexer.GetTotalSizeAsync(path);
     }
 
     public async Task<int> GetFileCountAsync(string path)

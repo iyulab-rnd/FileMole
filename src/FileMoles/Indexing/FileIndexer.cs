@@ -117,6 +117,11 @@ internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
     {
         return await _unitOfWork.FileIndices.GetCountAsync(path, cancellationToken);
     }
+    
+    internal async Task<long> GetTotalSizeAsync(string path, CancellationToken cancellationToken = default)
+    {
+        return await _unitOfWork.FileIndices.GetTotalSizeAsync(path, cancellationToken);
+    }
 
     public async Task RemoveEntriesNotScannedAfterAsync(DateTime scanStartTime, CancellationToken cancellationToken = default)
     {

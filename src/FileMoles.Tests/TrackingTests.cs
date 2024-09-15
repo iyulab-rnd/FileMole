@@ -45,7 +45,7 @@ public class TrackingTests : TestBase
     public async Task IncludePattern_ShouldOnlyTrackMatchingFiles()
     {
         var filePath = await CreateUniqueFileAsync();
-        await FileMole.Tracking.EnableAsync(TestPath);
+        await FileMole.Tracking.EnableAsync(filePath);
 
         var contentChanged = false;
         FileMole.FileContentChanged += (sender, e) => contentChanged = true;

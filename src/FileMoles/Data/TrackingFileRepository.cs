@@ -1,6 +1,5 @@
 ﻿using FileMoles.Data;
 using Microsoft.Data.Sqlite;
-using System.Threading;
 
 internal class TrackingFileRepository : IRepository<TrackingFile>
 {
@@ -10,13 +9,22 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
         CREATE TABLE IF NOT EXISTS TrackingFile (
             FullPath TEXT PRIMARY KEY,
             Hash TEXT NOT NULL UNIQUE,
-            IsDirectory INTEGER NOT NULL,
             LastTrackedTime INTEGER NOT NULL
         );";
 
     public TrackingFileRepository(DbContext unitOfWork)
     {
         _unitOfWork = unitOfWork;
+    }
+
+    private TrackingFile BuildTrackingFile(SqliteDataReader reader)
+    {
+        return new TrackingFile()
+        {
+            FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
+            Hash = reader.GetString(reader.GetOrdinal("Hash")),
+            LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
+        };
     }
 
     public async Task<IEnumerable<TrackingFile>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -30,13 +38,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                results.Add(new TrackingFile()
-                {
-                    FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
-                    IsDirectory = reader.GetBoolean(reader.GetOrdinal("IsDirectory")),
-                    Hash = reader.GetString(reader.GetOrdinal("Hash")),
-                    LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
-                });
+                results.Add(BuildTrackingFile(reader));
             }
 
             return results;
@@ -50,12 +52,11 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
             using var command = connection.CreateCommand();
             command.CommandText = @"
                 INSERT OR REPLACE INTO TrackingFile 
-                (FullPath, Hash, IsDirectory, LastTrackedTime) 
-                VALUES (@FullPath, @Hash, @IsDirectory, @LastTrackedTime)";
+                (FullPath, Hash, LastTrackedTime) 
+                VALUES (@FullPath, @Hash, @LastTrackedTime)";
 
             command.Parameters.AddWithValue("@FullPath", entity.FullPath);
             command.Parameters.AddWithValue("@Hash", entity.Hash);
-            command.Parameters.AddWithValue("@IsDirectory", entity.IsDirectory ? 1 : 0);
             command.Parameters.AddWithValue("@LastTrackedTime", new DateTimeOffset(entity.LastTrackedTime).ToUnixTimeSeconds());
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
@@ -101,13 +102,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                list.Add(new TrackingFile()
-                {
-                    FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
-                    IsDirectory = reader.GetBoolean(reader.GetOrdinal("IsDirectory")),
-                    Hash = reader.GetString(reader.GetOrdinal("Hash")),
-                    LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
-                });
+                list.Add(BuildTrackingFile(reader));
             }
             return list;
         }, cancellationToken);
@@ -124,13 +119,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (await reader.ReadAsync(cancellationToken))
             {
-                return new TrackingFile()
-                {
-                    FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
-                    IsDirectory = reader.GetBoolean(reader.GetOrdinal("IsDirectory")),
-                    Hash = reader.GetString(reader.GetOrdinal("Hash")),
-                    LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
-                };
+                return BuildTrackingFile(reader);
             }
 
             return null;
@@ -148,13 +137,7 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (await reader.ReadAsync(cancellationToken))
             {
-                return new TrackingFile()
-                {
-                    FullPath = reader.GetString(reader.GetOrdinal("FullPath")),
-                    IsDirectory = reader.GetBoolean(reader.GetOrdinal("IsDirectory")),
-                    Hash = reader.GetString(reader.GetOrdinal("Hash")),
-                    LastTrackedTime = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(reader.GetOrdinal("LastTrackedTime"))).UtcDateTime
-                };
+                return BuildTrackingFile(reader);
             }
 
             return null;
@@ -173,22 +156,5 @@ internal class TrackingFileRepository : IRepository<TrackingFile>
         }, cancellationToken);
 
         return count > 0;
-    }
-
-    public async Task<List<string>> GetTrackedFilesInDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
-    {
-        return await _unitOfWork.ExecuteAsync(async connection =>
-        {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT FullPath FROM TrackingFile WHERE FullPath LIKE @DirectoryPath AND IsDirectory = 0";
-            command.Parameters.AddWithValue("@DirectoryPath", directoryPath + "%");
-            var results = new List<string>();
-            using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                results.Add(reader.GetString(0));
-            }
-            return results;
-        }, cancellationToken);
     }
 }

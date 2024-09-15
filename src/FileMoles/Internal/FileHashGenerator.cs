@@ -4,7 +4,7 @@ namespace FileMoles.Internal;
 
 internal class FileHashGenerator
 {
-    public async Task<string> GenerateHashAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<string> GenerateFileContentHashAsync(string filePath, CancellationToken cancellationToken = default)
     {
         const int maxRetries = 3;
         const int delayBetweenRetries = 100; // milliseconds

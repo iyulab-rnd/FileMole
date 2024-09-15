@@ -279,4 +279,24 @@ VALUES (@Directory, @Name, @Size, @Created, @Modified, @Attributes, @LastScanned
             return Convert.ToInt32(result);
         }, cancellationToken);
     }
+
+    public async Task<long> GetTotalSizeAsync(string path, CancellationToken cancellationToken)
+    {
+        return await _unitOfWork.ExecuteAsync(async connection =>
+        {
+            using var command = connection.CreateCommand();
+
+            string queryPath = path.TrimEnd('/', '\\');
+            queryPath = $"{queryPath}%";
+
+            command.CommandText = @"
+            SELECT SUM(Size)
+            FROM FileIndex
+            WHERE Directory LIKE @Path";
+            command.Parameters.AddWithValue("@Path", queryPath);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return Convert.ToInt64(result);
+        }, cancellationToken);
+    }
 }

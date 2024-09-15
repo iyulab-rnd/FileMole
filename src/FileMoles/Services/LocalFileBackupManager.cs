@@ -51,15 +51,15 @@ internal class LocalFileBackupManager : IFileBackupManager
         var backupInfo = new FileInfo(backupPath);
         if (fileInfo.Length != backupInfo.Length || fileInfo.LastWriteTimeUtc != backupInfo.LastWriteTimeUtc)
         {
-            var currentHash = await _hashGenerator.GenerateHashAsync(filePath, cancellationToken);
-            var backupHash = await _hashGenerator.GenerateHashAsync(backupPath, cancellationToken);
+            var currentHash = await _hashGenerator.GenerateFileContentHashAsync(filePath, cancellationToken);
+            var backupHash = await _hashGenerator.GenerateFileContentHashAsync(backupPath, cancellationToken);
             return currentHash != backupHash;
         }
 
         return false;
     }
 
-    private string GetBackupPath(string filePath)
+    private static string GetBackupPath(string filePath)
     {
         var targetDirectory = Path.GetDirectoryName(filePath)!;
         var targetFileName = Path.GetFileName(filePath);

@@ -1,11 +1,6 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Threading;
-using System.Threading.Tasks;
-using FileMoles.Data;
+﻿using FileMoles.Data;
 using FileMoles.Indexing;
 using FileMoles.Interfaces;
-using FileMoles.Internal;
 
 namespace FileMoles.Internal;
 
