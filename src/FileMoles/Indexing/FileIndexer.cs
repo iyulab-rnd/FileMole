@@ -4,9 +4,9 @@ using System.Runtime.CompilerServices;
 
 namespace FileMoles.Indexing;
 
-internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
+internal class FileIndexer(DbContext dbContext) : IDisposable
 {
-    private readonly IUnitOfWork _unitOfWork = unitOfWork;
+    private readonly DbContext _dbContext = dbContext;
     private bool _disposed;
 
     public async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
@@ -20,13 +20,13 @@ internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
         }
 
         var fileIndex = FileIndex.CreateNew(file);
-        await _unitOfWork.FileIndices.UpsertAsync(fileIndex, cancellationToken);
+        await _dbContext.FileIndices.UpsertAsync(fileIndex, cancellationToken);
         return true;
     }
 
     public async IAsyncEnumerable<FileInfo> SearchAsync(string search, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var list = await _unitOfWork.FileIndices.SearchAsync(search, cancellationToken);
+        var list = await _dbContext.FileIndices.SearchAsync(search, cancellationToken);
 
         foreach (var fileIndex in list)
         {
@@ -59,7 +59,7 @@ internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
         }
         else
         {
-            await _unitOfWork.FileIndices.DeleteAsync(fileIndex, cancellationToken);
+            await _dbContext.FileIndices.DeleteAsync(fileIndex, cancellationToken);
         }
     }
 
@@ -73,7 +73,7 @@ internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
         var directory = file.DirectoryName ?? string.Empty;
         var name = file.Name;
 
-        var indexedFile = await _unitOfWork.FileIndices.GetByDirectoryAndNameAsync(directory, name, cancellationToken);
+        var indexedFile = await _dbContext.FileIndices.GetByDirectoryAndNameAsync(directory, name, cancellationToken);
         if (indexedFile == null)
         {
             return true;
@@ -84,19 +84,19 @@ internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
 
     public async Task<List<FileIndex>> GetFileIndicesByDirectoryAsync(string directory, CancellationToken cancellationToken)
     {
-        return await _unitOfWork.FileIndices.GetByDirectoryAsync(directory, cancellationToken);
+        return await _dbContext.FileIndices.GetByDirectoryAsync(directory, cancellationToken);
     }
 
     public async Task UpsertFileIndicesAsync(List<FileIndex> fileIndices, CancellationToken cancellationToken)
     {
-        await _unitOfWork.FileIndices.UpsertAsync(fileIndices, cancellationToken);
+        await _dbContext.FileIndices.UpsertAsync(fileIndices, cancellationToken);
     }
 
     public async Task DeleteFileIndicesAsync(List<FileIndex> fileIndices, CancellationToken cancellationToken)
     {
         foreach (var fileIndex in fileIndices)
         {
-            await _unitOfWork.FileIndices.DeleteAsync(fileIndex, cancellationToken);
+            await _dbContext.FileIndices.DeleteAsync(fileIndex, cancellationToken);
         }
     }
 
@@ -105,27 +105,27 @@ internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
         var directory = Path.GetDirectoryName(filePath) ?? string.Empty;
         var name = Path.GetFileName(filePath);
 
-        await _unitOfWork.FileIndices.DeleteByDirectoryAndNameAsync(directory, name, cancellationToken);
+        await _dbContext.FileIndices.DeleteByDirectoryAndNameAsync(directory, name, cancellationToken);
     }
     
     public async Task RemoveDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
     {
-        await _unitOfWork.FileIndices.DeleteByDirectoryAsync(directoryPath, cancellationToken);
+        await _dbContext.FileIndices.DeleteByDirectoryAsync(directoryPath, cancellationToken);
     }
 
     public async Task<int> GetFileCountAsync(string path, CancellationToken cancellationToken = default)
     {
-        return await _unitOfWork.FileIndices.GetCountAsync(path, cancellationToken);
+        return await _dbContext.FileIndices.GetCountAsync(path, cancellationToken);
     }
     
     internal async Task<long> GetTotalSizeAsync(string path, CancellationToken cancellationToken = default)
     {
-        return await _unitOfWork.FileIndices.GetTotalSizeAsync(path, cancellationToken);
+        return await _dbContext.FileIndices.GetTotalSizeAsync(path, cancellationToken);
     }
 
     public async Task RemoveEntriesNotScannedAfterAsync(DateTime scanStartTime, CancellationToken cancellationToken = default)
     {
-        await _unitOfWork.FileIndices.DeleteEntriesNotScannedAfterAsync(scanStartTime, cancellationToken);
+        await _dbContext.FileIndices.DeleteEntriesNotScannedAfterAsync(scanStartTime, cancellationToken);
     }
 
     internal async Task TryIndexFileAsync(FileInfo fileInfo, CancellationToken cancellationToken = default)
@@ -142,7 +142,7 @@ internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
 
     internal async Task UpdateLastScannedAsync(IEnumerable<FileIndex> fileIndices, CancellationToken cancellationToken = default)
     {
-        await _unitOfWork.FileIndices.UpdateLastScannedAsync(fileIndices, cancellationToken);
+        await _dbContext.FileIndices.UpdateLastScannedAsync(fileIndices, cancellationToken);
     }
 
     public void Dispose()
@@ -158,7 +158,7 @@ internal class FileIndexer(IUnitOfWork unitOfWork) : IDisposable
 
         if (disposing)
         {
-            _unitOfWork.Dispose();
+            _dbContext.Dispose();
         }
 
         _disposed = true;

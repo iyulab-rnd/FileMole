@@ -1,6 +1,6 @@
 ﻿namespace FileMoles.Interfaces;
 
-public interface IStorageProvider : IDisposable, IAsyncDisposable
+public interface IStorageProvider : IDisposable
 {
     Task<FileInfo> GetFileAsync(string filePath);
     IAsyncEnumerable<FileInfo> GetFilesAsync(string path);

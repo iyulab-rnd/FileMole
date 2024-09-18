@@ -31,8 +31,13 @@ var searchResults = await fileMole.SearchFilesAsync("example.txt");
 - 디바운스 설정을 통한 이벤트 최적화
 
 ```csharp
-// 추적 활성화
-await fileMole.Tracking.EnableAsync("C:\\MyFolder\\important.txt");
+// 추적 활성화 (디렉토리를 대상으로 합니다.)
+var options = new FileMoleTrackingOptions 
+{
+  Include = new List<string> { "*.txt", "*.docx", "*.pdf" },
+  Exclude = new List<string> { "*.tmp" }
+};
+await fileMole.Tracking.EnableAsync("C:\\MyFolder", options);
 
 // 디바운스 설정 (기본값: 1분)
 fileMole.SetOptions(options => options.DebounceTime = 30000); // 30초로 설정

@@ -1,7 +1,5 @@
 ﻿using FileMoles.Data;
-using FileMoles.Interfaces;
 using FileMoles.Internal;
-using FileMoles.Services;
 using Microsoft.Extensions.Configuration;
 
 namespace FileMoles;
@@ -41,13 +39,11 @@ public class FileMoleBuilder
 
     public FileMole Build()
     {
-        var fileMole = new FileMole(_options,
-            ResolveUnitOfWorkAsync().Result,
-            ResolveBackupManager());
+        var fileMole = new FileMole(_options, ResolveDbContextAsync().Result);
         return fileMole;
     }
 
-    private async Task<IUnitOfWork> ResolveUnitOfWorkAsync()
+    private async Task<DbContext> ResolveDbContextAsync()
     {
         var dataPath = _options.GetDataPath();
         var dbPath = Path.Combine(dataPath, Constants.DbFileName);
@@ -59,10 +55,5 @@ public class FileMoleBuilder
 
         var dbContext = await DbContext.CreateAsync(dbPath);
         return dbContext;
-    }
-
-    private IFileBackupManager ResolveBackupManager()
-    {
-        return new LocalFileBackupManager();
     }
 }

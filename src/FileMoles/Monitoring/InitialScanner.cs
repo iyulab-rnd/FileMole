@@ -1,12 +1,13 @@
 ﻿using FileMoles.Data;
 using FileMoles.Indexing;
 using FileMoles.Interfaces;
+using FileMoles.Internal;
 
-namespace FileMoles.Internal;
+namespace FileMoles.Monitoring;
 
-internal class InitialScanner(IUnitOfWork unitOfWork, FileIndexer fileIndexer, Dictionary<string, IStorageProvider> storageProviders)
+internal class InitialScanner(DbContext dbContext, FileIndexer fileIndexer, Dictionary<string, IStorageProvider> storageProviders)
 {
-    private readonly IUnitOfWork _unitOfWork = unitOfWork;
+    private readonly DbContext _dbContext = dbContext;
     private readonly FileIndexer _fileIndexer = fileIndexer;
     private readonly Dictionary<string, IStorageProvider> _storageProviders = storageProviders;
     private readonly int _degreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
@@ -22,7 +23,7 @@ internal class InitialScanner(IUnitOfWork unitOfWork, FileIndexer fileIndexer, D
                 async (path, ct) => await ScanDirectoryAsync(path, ct));
 
             await _fileIndexer.RemoveEntriesNotScannedAfterAsync(scanStartTime, cancellationToken);
-            await _unitOfWork.OptimizeAsync(cancellationToken);
+            await _dbContext.OptimizeAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {

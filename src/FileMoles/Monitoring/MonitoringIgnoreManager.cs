@@ -1,19 +1,17 @@
-﻿using GlobExpressions;
+﻿using FileMoles.Internal;
+using GlobExpressions;
 
-namespace FileMoles.Internal;
+namespace FileMoles.Monitoring;
 
-#if DEBUG
-public class FileIgnoreManager
-#else
-internal class FileIgnoreManager
-#endif
+
+public class MonitoringIgnoreManager
 {
     private readonly List<Glob> _globs = [];
     private readonly string _configPath;
     private readonly string _dataPath;
     private readonly List<string> _patterns = [];
 
-    public FileIgnoreManager(string dataPath)
+    public MonitoringIgnoreManager(string dataPath)
     {
         _dataPath = dataPath;
         _configPath = Path.Combine(dataPath, Constants.IgnoreFileName);
@@ -29,7 +27,7 @@ internal class FileIgnoreManager
         foreach (var line in File.ReadLines(path))
         {
             var trimmedLine = line.Trim();
-            if (!string.IsNullOrEmpty(trimmedLine) && !trimmedLine.StartsWith("#"))
+            if (!string.IsNullOrEmpty(trimmedLine) && !trimmedLine.StartsWith('#'))
             {
                 AddPattern(trimmedLine);
             }
@@ -44,12 +42,28 @@ internal class FileIgnoreManager
 
     private void AddPattern(string pattern)
     {
-        string adjustedPattern = 
-            pattern.EndsWith('/') 
-            ? $"**/{pattern}**" 
-            : $"**/{pattern}";
-        _globs.Add(new Glob(adjustedPattern, GlobOptions.CaseInsensitive));
-        _patterns.Add(adjustedPattern);
+        bool isIncludePattern = pattern.StartsWith('!');
+        string adjustedPattern = isIncludePattern
+            ? pattern[1..]  // '!' 제거 후 패턴 적용
+            : pattern;
+
+        adjustedPattern = adjustedPattern.EndsWith('/')
+            ? $"**/{adjustedPattern}**"
+            : $"**/{adjustedPattern}";
+
+        var globPattern = new Glob(adjustedPattern, GlobOptions.CaseInsensitive);
+
+        if (isIncludePattern)
+        {
+            // '!' 패턴은 무시 리스트에서 제외할 항목이므로, 가장 마지막에 추가
+            _globs.Insert(0, globPattern);
+        }
+        else
+        {
+            _globs.Add(globPattern);
+        }
+
+        _patterns.Add((isIncludePattern ? "!" : "") + adjustedPattern);
     }
 
     public bool ShouldIgnore(string path)
@@ -60,11 +74,24 @@ internal class FileIgnoreManager
             return true;
         }
         string relativePath = Path.GetRelativePath(_dataPath, fullPath).Replace('\\', '/');
-        return _globs.Any(glob =>
+
+        // 포함 패턴을 우선 처리
+        foreach (var glob in _globs)
         {
             bool isMatch = glob.IsMatch(relativePath);
-            return isMatch;
-        });
+            if (isMatch)
+            {
+                // 포함 패턴이면 무시하지 않음
+                if (_patterns[_globs.IndexOf(glob)].StartsWith('!'))
+                {
+                    return false;
+                }
+                // 무시 패턴이면 true 반환
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public string GetPatternsDebugInfo() =>
@@ -103,7 +130,7 @@ internal class FileIgnoreManager
             }
         }
         catch
-        {
+        {   
             // 접근 권한 문제 등으로 인한 예외 발생 시 무시
         }
 

@@ -2,13 +2,15 @@
 using FileMoles.Indexing;
 using FileMoles.Events;
 
-namespace FileMoles.Internal;
+namespace FileMoles.Monitoring;
 
-internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
+internal class MonitoringFileSystemWatcher(
+    FileIndexer fileIndexer,
+    MonitoringIgnoreManager ignoreManager) : IDisposable
 {
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new();
-    private readonly FileIgnoreManager _ignoreManager;
-    private readonly FileIndexer _fileIndexer;
+    private readonly MonitoringIgnoreManager _ignoreManager = ignoreManager;
+    private readonly FileIndexer _fileIndexer = fileIndexer;
     private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(300);
     private readonly ConcurrentDictionary<string, DateTime> _lastEventTime = new();
     private readonly ConcurrentDictionary<string, Task> _processingTasks = new();
@@ -24,17 +26,9 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
     internal event EventHandler<FileSystemEvent>? DirectoryDeleted;
     internal event EventHandler<FileSystemEvent>? DirectoryRenamed;
 
-    public FileMoleFileSystemWatcher(
-        FileIndexer fileIndexer,
-        FileIgnoreManager ignoreManager)
-    {
-        _ignoreManager = ignoreManager;
-        _fileIndexer = fileIndexer;
-    }
-
     public Task WatchDirectoryAsync(string path)
     {
-        ObjectDisposedException.ThrowIf(_disposed, nameof(FileMoleFileSystemWatcher));
+        ObjectDisposedException.ThrowIf(_disposed, nameof(MonitoringFileSystemWatcher));
 
         if (_watchers.ContainsKey(path))
         {
@@ -275,52 +269,5 @@ internal class FileMoleFileSystemWatcher : IDisposable, IAsyncDisposable
         }
 
         _disposed = true;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        await DisposeAsyncCore();
-
-        Dispose(false);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual async ValueTask DisposeAsyncCore()
-    {
-        foreach (var task in _processingTasks.Values)
-        {
-            try
-            {
-                await task;
-            }
-            catch (Exception ex)
-            {
-                // 이미 종료된 태스크나 에러 발생 시 로깅
-                Logger.Error($"Error during task completion: {ex.Message}");
-            }
-        }
-
-        foreach (var watcher in _watchers.Values)
-        {
-            watcher.EnableRaisingEvents = false;
-            UnsubscribeEvents(watcher);
-            watcher.Dispose();
-        }
-        _watchers.Clear();
-
-        // 이벤트 핸들러 해제
-        FileCreated = null;
-        FileChanged = null;
-        FileDeleted = null;
-        FileRenamed = null;
-        DirectoryCreated = null;
-        DirectoryChanged = null;
-        DirectoryDeleted = null;
-        DirectoryRenamed = null;
     }
 }

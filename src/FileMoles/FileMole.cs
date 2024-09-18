@@ -5,24 +5,25 @@ using FileMoles.Data;
 using FileMoles.Interfaces;
 using FileMoles.Tracking;
 using System.Diagnostics;
+using FileMoles.Monitoring;
 
 namespace FileMoles;
 
-public class FileMole : IDisposable, IAsyncDisposable
+public class FileMole : IDisposable
 {
     private bool _disposed;
 
     private readonly FileMoleOptions _options;
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly DbContext dbContext;
     private readonly FileIndexer _fileIndexer;
-    private readonly FileMoleFileSystemWatcher _fileSystemWatcher;
+    private readonly MonitoringFileSystemWatcher _fileSystemWatcher;
     private readonly Dictionary<string, IStorageProvider> _storageProviders;
+    private readonly TrackingManager _trackingManager;
     private readonly CancellationTokenSource _cts = new();
     private readonly InitialScanner _initialScanner;
     private readonly Task _initializationTask;
 
-    public TrackingManager Tracking { get; }
-
+    // event for Monitoring
     public event EventHandler<FileMoleEventArgs>? FileCreated;
     public event EventHandler<FileMoleEventArgs>? FileChanged;
     public event EventHandler<FileMoleEventArgs>? FileDeleted;
@@ -33,36 +34,30 @@ public class FileMole : IDisposable, IAsyncDisposable
     public event EventHandler<FileMoleEventArgs>? DirectoryDeleted;
     public event EventHandler<FileMoleEventArgs>? DirectoryRenamed;
 
+    // event for Tracking
     public event EventHandler<FileContentChangedEventArgs>? FileContentChanged;
 
     public bool IsInitialScanComplete { get; private set; }
     public event EventHandler? InitialScanCompleted;
 
-    internal FileMole(FileMoleOptions options,
-        IUnitOfWork unitOfWork,
-        IFileBackupManager backupManager)
+    internal FileMole(FileMoleOptions options, DbContext dbContext)
     {
         _options = options;
-        _unitOfWork = unitOfWork;
+        this.dbContext = dbContext;
 
         var dataPath = options.GetDataPath();
-        var ignoreManager = new FileIgnoreManager(dataPath);
+        var ignoreManager = new MonitoringIgnoreManager(dataPath);
 
-        _fileIndexer = new FileIndexer(unitOfWork);
-        _fileSystemWatcher = new FileMoleFileSystemWatcher(_fileIndexer, ignoreManager);
+        _fileIndexer = new FileIndexer(dbContext);
+        _fileSystemWatcher = new MonitoringFileSystemWatcher(_fileIndexer, ignoreManager);
         _storageProviders = [];
 
-        Tracking = new TrackingManager();
-        Tracking.Init(new InternalTrackingManager(
-            options.DebounceTime,
-            OnFileContentChanged,
-            unitOfWork,
-            backupManager));
+        _trackingManager = new TrackingManager(dbContext, options.DebounceTime);
 
         InitializeStorageProviders();
         InitializeFileWatcher();
 
-        _initialScanner = new InitialScanner(unitOfWork, _fileIndexer, _storageProviders);
+        _initialScanner = new InitialScanner(dbContext, _fileIndexer, _storageProviders);
 
         _initializationTask = InitializeAsync(_cts.Token);
     }
@@ -96,13 +91,12 @@ public class FileMole : IDisposable, IAsyncDisposable
 
     private async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        await _unitOfWork.OptimizeAsync(cancellationToken);
+        await dbContext.OptimizeAsync(cancellationToken);
 
         // 비동기적으로 실행
         _ = Task.Run(async () =>
         {
             var sw = Stopwatch.StartNew();
-            _ = Tracking.ReadyAsync(cancellationToken);
 
             await _initialScanner.ScanAsync(_options.Moles.Select(m => m.Path), cancellationToken);
 
@@ -124,11 +118,10 @@ public class FileMole : IDisposable, IAsyncDisposable
         raiseEvent(e);
         try
         {
-            await Tracking.HandleFileEventAsync(e, _cts.Token);
+            await _trackingManager.HandleFileEventAsync(e, _cts.Token);
         }
         catch (ObjectDisposedException)
         {
-            // 객체가 이미 해제된 경우 무시
         }
     }
 
@@ -205,7 +198,7 @@ public class FileMole : IDisposable, IAsyncDisposable
         var provider = GetStorageProviderForPath(path);
         if (provider != null)
         {
-            await foreach(var file in provider.GetFilesAsync(path))
+            await foreach (var file in provider.GetFilesAsync(path))
             {
                 _ = _fileIndexer.TryIndexFileAsync(file);
                 yield return file;
@@ -320,6 +313,16 @@ public class FileMole : IDisposable, IAsyncDisposable
         return provider!.DeleteAsync(fullPath);
     }
 
+    public Task TrackingFileAsync(string fullPath)
+    {
+        return _trackingManager.TrackingAsync(fullPath);
+    }
+
+    public Task UntrackingFileAsync(string directory)
+    {
+        return _trackingManager.UntrackingAsync(directory);
+    }
+
     protected virtual void Dispose(bool disposing)
     {
         if (!_disposed)
@@ -349,7 +352,7 @@ public class FileMole : IDisposable, IAsyncDisposable
                         disposableProvider.Dispose();
                     }
                 }
-                Tracking.Dispose();
+                _trackingManager.Dispose();
             }
 
             _disposed = true;
@@ -360,48 +363,5 @@ public class FileMole : IDisposable, IAsyncDisposable
     {
         Dispose(disposing: true);
         GC.SuppressFinalize(this);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        await DisposeAsyncCore().ConfigureAwait(false);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual async ValueTask DisposeAsyncCore()
-    {
-        if (_cts.IsCancellationRequested)
-            return;
-
-        _cts.Cancel();
-        try
-        {
-            await _initializationTask.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected exception when task is canceled
-        }
-
-        await _fileSystemWatcher.DisposeAsync().ConfigureAwait(false);
-        await Tracking.DisposeAsync().ConfigureAwait(false);
-        _fileIndexer.Dispose();
-
-        foreach (var provider in _storageProviders.Values)
-        {
-            if (provider is IAsyncDisposable asyncDisposableProvider)
-            {
-                await asyncDisposableProvider.DisposeAsync().ConfigureAwait(false);
-            }
-            else if (provider is IDisposable disposableProvider)
-            {
-                disposableProvider.Dispose();
-            }
-        }
     }
 }
