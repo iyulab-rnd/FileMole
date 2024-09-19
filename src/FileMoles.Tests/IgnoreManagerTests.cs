@@ -19,6 +19,7 @@ public class IgnoreManagerTests : IDisposable
     public void Dispose()
     {
         Directory.Delete(this.testPath, true);
+        GC.SuppressFinalize(this);
     }
 
     [Fact]
@@ -99,7 +100,7 @@ public class IgnoreManagerTests : IDisposable
         File.Delete(ignoreFilePath);
 
         // IgnoreManager 인스턴스 생성 (파일이 없으므로 생성되어야 함)
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        _ = new IgnoreManager(ignoreFilePath);
 
         // .ignore 파일이 생성되었는지 확인
         Assert.True(File.Exists(ignoreFilePath), ".ignore 파일이 생성되어야 합니다.");
@@ -491,5 +492,126 @@ bin/
         Assert.False(ignoreManager.IsIgnored(srcDir), "src directory should be included.");
         Assert.False(ignoreManager.IsIgnored(srcFile), "src/main.cs should be included.");
         Assert.True(ignoreManager.IsIgnored(rootFile), "readme.md should be ignored.");
+    }
+
+    [Fact]
+    public void AddRule_ShouldAddNewRuleToIgnoreFile()
+    {
+        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var newRule = "*.log";
+
+        ignoreManager.AddRules(newRule);
+
+        var rules = ignoreManager.GetRules().ToList();
+        Assert.Contains(newRule, rules);
+
+        // Verify that the rule was actually added to the file
+        var fileContent = File.ReadAllText(ignoreFilePath);
+        Assert.Contains(newRule, fileContent);
+    }
+
+    [Fact]
+    public void AddRule_ShouldImmediatelyApplyNewRule()
+    {
+        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var newRule = "*.log";
+        var testFile = Path.Combine(testPath, "test.log");
+        File.WriteAllText(testFile, "Test log file");
+
+        Assert.False(ignoreManager.IsIgnored(testFile));
+
+        ignoreManager.AddRules(newRule);
+
+        Assert.True(ignoreManager.IsIgnored(testFile));
+    }
+
+    [Fact]
+    public void RemoveRule_ShouldRemoveExistingRuleFromIgnoreFile()
+    {
+        var initialRules = new[] { "*.txt", "*.log" };
+        File.WriteAllLines(ignoreFilePath, initialRules);
+
+        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        ignoreManager.RemoveRules("*.log");
+
+        var rules = ignoreManager.GetRules().ToList();
+        Assert.DoesNotContain("*.log", rules);
+        Assert.Contains("*.txt", rules);
+
+        // Verify that the rule was actually removed from the file
+        var fileContent = File.ReadAllText(ignoreFilePath);
+        Assert.DoesNotContain("*.log", fileContent);
+        Assert.Contains("*.txt", fileContent);
+    }
+
+    [Fact]
+    public void RemoveRule_ShouldImmediatelyApplyRuleRemoval()
+    {
+        var initialRules = new[] { "*.txt", "*.log" };
+        File.WriteAllLines(ignoreFilePath, initialRules);
+
+        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var testFile = Path.Combine(testPath, "test.log");
+        File.WriteAllText(testFile, "Test log file");
+
+        Assert.True(ignoreManager.IsIgnored(testFile));
+
+        ignoreManager.RemoveRules("*.log");
+
+        Assert.False(ignoreManager.IsIgnored(testFile));
+    }
+
+    [Fact]
+    public void GetRules_ShouldReturnAllNonCommentRules()
+    {
+        var rules = new[]
+        {
+            "# This is a comment",
+            "*.txt",
+            "",
+            "# Another comment",
+            "!important.doc",
+            "temp/"
+        };
+        File.WriteAllLines(ignoreFilePath, rules);
+
+        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var retrievedRules = ignoreManager.GetRules().ToList();
+
+        Assert.Equal(3, retrievedRules.Count);
+        Assert.Contains("*.txt", retrievedRules);
+        Assert.Contains("!important.doc", retrievedRules);
+        Assert.Contains("temp/", retrievedRules);
+        Assert.DoesNotContain("# This is a comment", retrievedRules);
+        Assert.DoesNotContain("# Another comment", retrievedRules);
+        Assert.DoesNotContain("", retrievedRules);
+    }
+
+    [Fact]
+    public void AddRule_ShouldThrowExceptionForEmptyRule()
+    {
+        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        Assert.Throws<ArgumentException>(() => ignoreManager.AddRules(""));
+        Assert.Throws<ArgumentException>(() => ignoreManager.AddRules("  "));
+    }
+
+    [Fact]
+    public void RemoveRule_ShouldThrowExceptionForEmptyRule()
+    {
+        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        Assert.Throws<ArgumentException>(() => ignoreManager.RemoveRules(""));
+        Assert.Throws<ArgumentException>(() => ignoreManager.RemoveRules("  "));
+    }
+
+    [Fact]
+    public void RemoveRule_ShouldNotThrowExceptionForNonExistentRule()
+    {
+        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var initialRules = ignoreManager.GetRules().ToList();
+
+        ignoreManager.RemoveRules("non_existent_rule");
+
+        var finalRules = ignoreManager.GetRules().ToList();
+        Assert.Equal(initialRules, finalRules);
     }
 }

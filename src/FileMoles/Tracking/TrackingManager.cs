@@ -2,32 +2,20 @@
 using FileMoles.Diff;
 using FileMoles.Events;
 using System.Collections.Concurrent;
-using System.Threading.Channels;
 
 namespace FileMoles.Tracking;
 
-internal class TrackingManager : IDisposable
+internal class TrackingManager(DbContext dbContext, int debounceTime) : IDisposable
 {
-    private readonly DbContext _dbContext;
-    private readonly int _debounceTime;
+    private readonly DbContext _dbContext = dbContext;
     private readonly ConcurrentDictionary<string, TrackingDirectoryManager> _trackingDirs = [];
-    private readonly Channel<FileSystemEvent> _eventChannel;
-    private readonly CancellationTokenSource _cts = new();
+    private readonly Debouncer<string, FileSystemEvent> _debouncer = new(TimeSpan.FromMilliseconds(debounceTime));
 
     internal event EventHandler<FileContentChangedEventArgs>? FileContentChanged;
-
-    public TrackingManager(DbContext dbContext, int debounceTime)
-    {
-        _dbContext = dbContext;
-        _debounceTime = debounceTime;
-        _eventChannel = Channel.CreateUnbounded<FileSystemEvent>();
-        StartEventProcessing(_cts.Token);
-    }
 
     public async Task InitializeAsync()
     {
         await LoadTrackingDirsAsync();
-        await ReadyAsync();
     }
 
     private async Task LoadTrackingDirsAsync()
@@ -35,46 +23,9 @@ internal class TrackingManager : IDisposable
         var dirs = await _dbContext.TrackingDirs.GetAllAsync();
         foreach (var dir in dirs)
         {
-            var manager = new TrackingDirectoryManager(dir.Path, _dbContext);
-            await manager.InitializeAsync();
+            var manager = await TrackingDirectoryManager.CreateByDirectoryAsync(dir.Path, _dbContext);
             _trackingDirs.TryAdd(dir.Path, manager);
         }
-    }
-
-    private async Task ReadyAsync()
-    {
-        var dirsInDb = await _dbContext.TrackingDirs.GetAllAsync();
-        foreach (var dir in dirsInDb)
-        {
-            if (!TrackingDirectoryManager.HasHill(dir.Path))
-            {
-                var manager = new TrackingDirectoryManager(dir.Path, _dbContext);
-                await manager.InitializeAsync();
-
-                _trackingDirs.TryAdd(dir.Path, new TrackingDirectoryManager(dir.Path, _dbContext));
-            }
-        }
-
-        foreach (var dirManager in _trackingDirs.Values)
-        {
-            if (TrackingDirectoryManager.HasHill(dirManager.DirectoryPath))
-            {
-                var subDirs = Directory.GetDirectories(Path.Combine(dirManager.DirectoryPath, ".hill"));
-                foreach (var subDir in subDirs)
-                {
-                    if (!await _dbContext.TrackingDirs.IsTrackingPathAsync(subDir))
-                    {
-                        var newDir = TrackingDir.CreateNew(subDir);
-                        await _dbContext.TrackingDirs.UpsertAsync(newDir);
-
-                        var manager = new TrackingDirectoryManager(subDir, _dbContext);
-                        await manager.InitializeAsync();
-                    }
-                }
-            }
-        }
-
-        await Task.CompletedTask;
     }
 
     public async Task TrackingAsync(string path)
@@ -82,9 +33,19 @@ internal class TrackingManager : IDisposable
         if (_trackingDirs.ContainsKey(path))
             return;
 
-        var manager = new TrackingDirectoryManager(path, _dbContext);
-        await manager.InitializeAsync();
-        _trackingDirs.TryAdd(path, manager);
+        if (Directory.Exists(path))
+        {
+            var manager = await TrackingDirectoryManager.CreateByDirectoryAsync(path, _dbContext);
+            _trackingDirs.TryAdd(path, manager);
+        }
+        else if (File.Exists(path))
+        {
+            var dirPath = Path.GetDirectoryName(path)!;
+            var manager = await TrackingDirectoryManager.CreateByFileAsync(path, _dbContext);
+            _trackingDirs.TryAdd(dirPath, manager);
+        }
+        else
+            throw new FileNotFoundException(path);
     }
 
     public async Task UntrackingAsync(string path)
@@ -95,83 +56,61 @@ internal class TrackingManager : IDisposable
         }
     }
 
-    public async Task<bool> IsTrackingFileAsync(string filePath)
+    public Task<bool> IsTrackingFileAsync(string filePath)
     {
         var normalizedFilePath = Path.GetFullPath(filePath);
         foreach (var dirManager in _trackingDirs.Values)
         {
             var normalizedDirPath = Path.GetFullPath(dirManager.DirectoryPath);
             if (normalizedFilePath.StartsWith(normalizedDirPath) && !dirManager.IsIgnored(normalizedFilePath))
-                return await Task.FromResult(true);
+                return Task.FromResult(true);
         }
 
-        return await Task.FromResult(false);
+        return Task.FromResult(false);
     }
 
-    internal async Task HandleFileEventAsync(FileSystemEvent e, CancellationToken token)
+    public async Task HandleFileEventAsync(FileSystemEvent e)
     {
         foreach (var manager in _trackingDirs.Values)
         {
             if (e.FullPath.StartsWith(manager.DirectoryPath) && !manager.IsIgnored(e.FullPath))
             {
-                await _eventChannel.Writer.WriteAsync(e, token);
+                await _debouncer.DebounceAsync(e.FullPath, e, ProcessDebouncedEventAsync);
+                break;
             }
         }
     }
 
-    private async void StartEventProcessing(CancellationToken token)
+    private async Task ProcessDebouncedEventAsync(FileSystemEvent e)
     {
-        var debounceDictionary = new ConcurrentDictionary<string, DateTime>();
-        while (await _eventChannel.Reader.WaitToReadAsync(token))
+        if (_trackingDirs.TryGetValue(Path.GetDirectoryName(e.FullPath)!, out var manager))
         {
-            if (_eventChannel.Reader.TryRead(out var fileEvent))
+            if (manager.HasBackup(e.FullPath))
             {
-                debounceDictionary[fileEvent.FullPath] = DateTime.UtcNow;
+                var strategy = DiffStrategyFactory.CreateStrategy(e.FullPath);
+                var oldFilePath = manager.GetBackupFilePath(e.FullPath);
+                var diff = await strategy.GenerateDiffAsync(oldFilePath, e.FullPath, CancellationToken.None);
 
-                _ = Task.Run(async () =>
+                if (diff.IsChanged)
                 {
-                    await Task.Delay(_debounceTime, token);
-
-                    if (debounceDictionary.TryGetValue(fileEvent.FullPath, out var lastEventTime))
-                    {
-                        if ((DateTime.UtcNow - lastEventTime).TotalMilliseconds >= _debounceTime)
-                        {
-                            debounceDictionary.TryRemove(fileEvent.FullPath, out _);
-
-                            if (_trackingDirs.TryGetValue(Path.GetDirectoryName(fileEvent.FullPath)!, out var manager))
-                            {
-                                if (manager.HasBackup(fileEvent.FullPath))
-                                {
-                                    var strategy = DiffStrategyFactory.CreateStrategy(fileEvent.FullPath);
-                                    var oldFilePath = manager.GetBackupFilePath(fileEvent.FullPath);
-                                    var diff = await strategy.GenerateDiffAsync(oldFilePath, fileEvent.FullPath, token);
-
-                                    if (diff.IsChanged)
-                                    {
-                                        FileContentChanged?.Invoke(this, new FileContentChangedEventArgs(
-                                            fileEvent.FullPath,
-                                            null,
-                                            fileEvent.ChangeType,
-                                            false,
-                                            diff));
-                                    }
-                                }
-
-                                manager.BackupFile(fileEvent.FullPath);
-                            }
-                        }
-                    }
-                }, token);
+                    FileContentChanged?.Invoke(this, new FileContentChangedEventArgs(
+                        e.FullPath,
+                        null,
+                        e.ChangeType,
+                        false,
+                        diff));
+                }
             }
+
+            await manager.BackupFileAsync(e.FullPath);
         }
     }
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
-
+        _debouncer.Dispose();
         _trackingDirs.Clear();
         GC.SuppressFinalize(this);
     }
 }
+

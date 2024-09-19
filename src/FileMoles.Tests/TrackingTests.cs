@@ -1,84 +1,78 @@
-﻿//using Xunit.Abstractions;
+﻿using Xunit.Abstractions;
 
-//namespace FileMoles.Tests;
+namespace FileMoles.Tests;
 
-//public class TrackingTests : TestBase
-//{
-//    public TrackingTests(ITestOutputHelper output) : base(output) { }
+public class TrackingTests(ITestOutputHelper output) : TestBase(output)
+{
+    [Fact]
+    public async Task EnableTracking_ShouldTrackFileChanges()
+    {
+        var filePath = await CreateUniqueTxtFileAsync();
+        await FileMole.TrackingAsync(filePath);
 
-//    [Fact]
-//    public async Task EnableTracking_ShouldTrackFileChanges()
-//    {
-//        var filePath = await CreateUniqueFileAsync();
-//        await FileMole.Tracking.EnableAsync(filePath);
+        var contentChanged = false;
+        FileMole.FileContentChanged += (sender, e) => contentChanged = true;
 
-//        await Task.Delay(TimeSpan.FromSeconds(2)); // Wait for scan
+        await SafeFileIO.AppendAllTextAsync(filePath, "New content");
 
-//        var contentChanged = false;
-//        FileMole.FileContentChanged += (sender, e) => contentChanged = true;
+        await Task.Delay(TimeSpan.FromSeconds(2)); // Wait for debounce
+        Assert.True(contentChanged);
+    }
 
-//        await SafeFileIO.AppendAllTextAsync(filePath, "New content");
+    [Fact]
+    public async Task IgnorePattern_ShouldNotTrackMatchingFiles()
+    {
+        var filePath = await CreateUniqueTxtFileAsync();
+        await FileMole.TrackingAsync(TestPath);
 
-//        await Task.Delay(TimeSpan.FromSeconds(2)); // Wait for debounce
-//        Assert.True(contentChanged);
-//    }
+        var contentChanged = false;
+        FileMole.FileContentChanged += (sender, e) => contentChanged = true;
 
-//    [Fact]
-//    public async Task IgnorePattern_ShouldNotTrackMatchingFiles()
-//    {
-//        var filePath = await CreateUniqueFileAsync();
+        var tmpFilePath = Path.ChangeExtension(filePath, ".tmp");
+        await SafeFileIO.WriteAllTextAsync(tmpFilePath, "Temp content");
 
-//        await FileMole.Tracking.EnableAsync(TestPath);
-//        await FileMole.Tracking.WaitForReadyAsync();
+        await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
+        Assert.False(contentChanged);
+    }
 
-//        var contentChanged = false;
-//        FileMole.FileContentChanged += (sender, e) => contentChanged = true;
+    [Fact]
+    public async Task IncludePattern_ShouldOnlyTrackMatchingFiles()
+    {
+        var filePath = await CreateUniqueTxtFileAsync();
+        await FileMole.TrackingAsync(filePath);
 
-//        var tmpFilePath = Path.ChangeExtension(filePath, ".tmp");
-//        await SafeFileIO.WriteAllTextAsync(tmpFilePath, "Temp content");
+        var contentChanged = false;
+        FileMole.FileContentChanged += (sender, e) => contentChanged = true;
 
-//        await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
-//        Assert.False(contentChanged);
-//    }
+        await SafeFileIO.AppendAllTextAsync(filePath, "New content");
 
-//    [Fact]
-//    public async Task IncludePattern_ShouldOnlyTrackMatchingFiles()
-//    {
-//        var filePath = await CreateUniqueFileAsync();
-//        await FileMole.Tracking.EnableAsync(filePath);
+        await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
+        Assert.True(contentChanged);
 
-//        var contentChanged = false;
-//        FileMole.FileContentChanged += (sender, e) => contentChanged = true;
+        contentChanged = false;
+        var nonMatchingPath = Path.ChangeExtension(filePath, ".log");
+        await SafeFileIO.WriteAllTextAsync(nonMatchingPath, "Log content");
 
-//        await SafeFileIO.AppendAllTextAsync(filePath, "New content");
+        await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
+        Assert.False(contentChanged);
+    }
 
-//        await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
-//        Assert.True(contentChanged);
+    [Fact]
+    public async Task Debounce_ShouldGroupMultipleChanges()
+    {
+        var filePath = await CreateUniqueTxtFileAsync();
+        await FileMole.TrackingAsync(filePath);
 
-//        contentChanged = false;
-//        var nonMatchingPath = Path.ChangeExtension(filePath, ".log");
-//        await SafeFileIO.WriteAllTextAsync(nonMatchingPath, "Log content");
+        var changeCount = 0;
+        FileMole.FileContentChanged += (sender, e) => changeCount++;
 
-//        await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
-//        Assert.False(contentChanged);
-//    }
+        for (int i = 0; i < 5; i++)
+        {
+            await SafeFileIO.AppendAllTextAsync(filePath, $"Content {i}");
+            await Task.Delay(50); // Small delay between changes
+        }
 
-//    [Fact]
-//    public async Task Debounce_ShouldGroupMultipleChanges()
-//    {
-//        var filePath = await CreateUniqueFileAsync();
-//        await FileMole.Tracking.EnableAsync(filePath);
-
-//        var changeCount = 0;
-//        FileMole.FileContentChanged += (sender, e) => changeCount++;
-
-//        for (int i = 0; i < 5; i++)
-//        {
-//            await SafeFileIO.AppendAllTextAsync(filePath, $"Content {i}");
-//            await Task.Delay(50); // Small delay between changes
-//        }
-
-//        await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
-//        Assert.Equal(1, changeCount);
-//    }
-//}
+        await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
+        Assert.Equal(1, changeCount);
+    }
+}

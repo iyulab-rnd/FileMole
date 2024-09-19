@@ -37,7 +37,7 @@ public abstract class TestBase : IDisposable
             .Build();
     }
 
-    protected async Task<string> CreateUniqueFileAsync(string content = "test")
+    protected async Task<string> CreateUniqueTxtFileAsync(string content = "test")
     {
         string filePath = Path.Combine(TestPath, Guid.NewGuid().ToString() + ".txt");
         await SafeFileIO.WriteAllTextAsync(filePath, content);

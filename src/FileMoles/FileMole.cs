@@ -46,13 +46,14 @@ public class FileMole : IDisposable
         this.dbContext = dbContext;
 
         var dataPath = options.GetDataPath();
-        var ignoreManager = new MonitoringIgnoreManager(dataPath);
+        var ignoreManager = new MonitoringFileIgnoreManager(dataPath);
 
         _fileIndexer = new FileIndexer(dbContext);
         _fileSystemWatcher = new MonitoringFileSystemWatcher(_fileIndexer, ignoreManager);
         _storageProviders = [];
 
         _trackingManager = new TrackingManager(dbContext, options.DebounceTime);
+        _trackingManager.FileContentChanged += OnFileContentChanged;
 
         InitializeStorageProviders();
         InitializeFileWatcher();
@@ -118,7 +119,7 @@ public class FileMole : IDisposable
         raiseEvent(e);
         try
         {
-            await _trackingManager.HandleFileEventAsync(e, _cts.Token);
+            await _trackingManager.HandleFileEventAsync(e);
         }
         catch (ObjectDisposedException)
         {
@@ -313,12 +314,12 @@ public class FileMole : IDisposable
         return provider!.DeleteAsync(fullPath);
     }
 
-    public Task TrackingFileAsync(string fullPath)
+    public Task TrackingAsync(string fullPath)
     {
         return _trackingManager.TrackingAsync(fullPath);
     }
 
-    public Task UntrackingFileAsync(string directory)
+    public Task UntrackingAsync(string directory)
     {
         return _trackingManager.UntrackingAsync(directory);
     }
@@ -352,6 +353,7 @@ public class FileMole : IDisposable
                         disposableProvider.Dispose();
                     }
                 }
+                _trackingManager.FileContentChanged -= OnFileContentChanged;
                 _trackingManager.Dispose();
             }
 

@@ -12,7 +12,7 @@ public class MonitoringTests : TestBase
         var eventTriggered = false;
         FileMole.FileCreated += (sender, e) => eventTriggered = true;
 
-        await CreateUniqueFileAsync();
+        await CreateUniqueTxtFileAsync();
 
         await Task.Delay(700); // Wait for event to be processed
         Assert.True(eventTriggered);
@@ -21,7 +21,7 @@ public class MonitoringTests : TestBase
     [Fact]
     public async Task FileChanged_ShouldTriggerEvent()
     {
-        var filePath = await CreateUniqueFileAsync();
+        var filePath = await CreateUniqueTxtFileAsync();
         var eventTriggered = false;
         FileMole.FileChanged += (sender, e) => eventTriggered = true;
 
@@ -34,7 +34,7 @@ public class MonitoringTests : TestBase
     [Fact]
     public async Task FileDeleted_ShouldTriggerEvent()
     {
-        var filePath = await CreateUniqueFileAsync();
+        var filePath = await CreateUniqueTxtFileAsync();
         var eventTriggered = false;
         FileMole.FileDeleted += (sender, e) => eventTriggered = true;
 

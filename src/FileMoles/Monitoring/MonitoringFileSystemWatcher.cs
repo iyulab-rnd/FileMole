@@ -6,10 +6,10 @@ namespace FileMoles.Monitoring;
 
 internal class MonitoringFileSystemWatcher(
     FileIndexer fileIndexer,
-    MonitoringIgnoreManager ignoreManager) : IDisposable
+    MonitoringFileIgnoreManager ignoreManager) : IDisposable
 {
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new();
-    private readonly MonitoringIgnoreManager _ignoreManager = ignoreManager;
+    private readonly MonitoringFileIgnoreManager _ignoreManager = ignoreManager;
     private readonly FileIndexer _fileIndexer = fileIndexer;
     private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(300);
     private readonly ConcurrentDictionary<string, DateTime> _lastEventTime = new();

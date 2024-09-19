@@ -5,8 +5,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "솔루션 항목", "솔루션 항목", "{6CE363AD-114D-4B9C-B5F5-63D6F33CB7BC}"
 	ProjectSection(SolutionItems) = preProject
-		..\Dev.md = ..\Dev.md
 		..\README.md = ..\README.md
+		..\README_TRACKING.md = ..\README_TRACKING.md
 	EndProjectSection
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FileMoles", "FileMoles\FileMoles.csproj", "{496894EA-B5B4-4863-ABBD-319FCE17604A}"

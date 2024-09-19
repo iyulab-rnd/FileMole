@@ -1,4 +1,5 @@
 ﻿using FileMoles.Data;
+using MimeKit.Cryptography;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -12,16 +13,16 @@ internal partial class TrackingDirectoryManager
     private readonly string _backupFolderPath;
     private readonly TrackingIgnoreManager _ignoreManager;
 
-    public TrackingDirectoryManager(string directoryPath, DbContext unitOfWork)
+    private TrackingDirectoryManager(string fullPath, DbContext unitOfWork)
     {
-        DirectoryPath = Path.GetFullPath(directoryPath);  // 경로 정규화
-        _hillFolderPath = Path.Combine(DirectoryPath, ".hill");
+        DirectoryPath = Path.GetFullPath(fullPath);  // 경로 정규화
+        _hillFolderPath = Path.Combine(DirectoryPath, FileMoleGlobalOptions.HillName);
         _backupFolderPath = Path.Combine(_hillFolderPath, "backups");
         _dbContext = unitOfWork;
-        _ignoreManager = new TrackingIgnoreManager(Path.Combine(_hillFolderPath, ".filemoleignore"));
+        _ignoreManager = new TrackingIgnoreManager(Path.Combine(_hillFolderPath, FileMoleGlobalOptions.IgnoreFileName));
     }
 
-    public async Task InitializeAsync()
+    private async Task InitializeAsync()
     {
         if (_ignoreManager.IsIgnored(DirectoryPath))
         {
@@ -108,17 +109,20 @@ internal partial class TrackingDirectoryManager
         return Path.Combine(_backupFolderPath, $"{relativePathHash}.bak");
     }
 
-    public void BackupFile(string filePath)
+    public Task BackupFileAsync(string filePath)
     {
-        var backupPath = GetBackupFilePath(filePath);
-        var backupDir = Path.GetDirectoryName(backupPath)!;
-
-        if (!Directory.Exists(backupDir))
+        return Task.Run(() =>
         {
-            Directory.CreateDirectory(backupDir);
-        }
+            var backupPath = GetBackupFilePath(filePath);
+            var backupDir = Path.GetDirectoryName(backupPath)!;
 
-        File.Copy(filePath, backupPath, true); // 파일 덮어쓰기
+            if (!Directory.Exists(backupDir))
+            {
+                Directory.CreateDirectory(backupDir);
+            }
+
+            File.Copy(filePath, backupPath, true); // 파일 덮어쓰기
+        });
     }
 
     public bool HasBackup(string filePath)
@@ -130,9 +134,37 @@ internal partial class TrackingDirectoryManager
 
 internal partial class TrackingDirectoryManager
 {
+    public static async Task<TrackingDirectoryManager> CreateByDirectoryAsync(string dirPath, DbContext unitOfWork)
+    {
+        if (Directory.Exists(dirPath))
+        {
+            var manager = new TrackingDirectoryManager(dirPath, unitOfWork);
+            await manager.InitializeAsync();
+            manager._ignoreManager.IncludeTextFormat();
+            return manager;
+        }
+        else
+            throw new FileNotFoundException(dirPath);
+    }
+
+    public static async Task<TrackingDirectoryManager> CreateByFileAsync(string filePath, DbContext unitOfWork)
+    {
+        if (File.Exists(filePath))
+        {
+            var directory = Path.GetDirectoryName(filePath)!;
+            var manager = new TrackingDirectoryManager(directory, unitOfWork);
+            await manager.InitializeAsync();
+            manager._ignoreManager.IncludeFilePath(filePath);
+            await manager.BackupFileAsync(filePath);
+            return manager;
+        }
+        else
+            throw new FileNotFoundException(filePath);
+    }
+
     public static bool HasHill(string directoryPath)
     {
-        var hillFolderPath = Path.Combine(Path.GetFullPath(directoryPath), ".hill");
+        var hillFolderPath = Path.Combine(Path.GetFullPath(directoryPath), FileMoleGlobalOptions.HillName);
         return Directory.Exists(hillFolderPath);
     }
 }

@@ -3,15 +3,14 @@ using GlobExpressions;
 
 namespace FileMoles.Monitoring;
 
-
-public class MonitoringIgnoreManager
+public class MonitoringFileIgnoreManager
 {
     private readonly List<Glob> _globs = [];
     private readonly string _configPath;
     private readonly string _dataPath;
     private readonly List<string> _patterns = [];
 
-    public MonitoringIgnoreManager(string dataPath)
+    public MonitoringFileIgnoreManager(string dataPath)
     {
         _dataPath = dataPath;
         _configPath = Path.Combine(dataPath, Constants.IgnoreFileName);
@@ -97,7 +96,7 @@ public class MonitoringIgnoreManager
     public string GetPatternsDebugInfo() =>
         $"Current patterns:{Environment.NewLine}{string.Join(Environment.NewLine, _patterns.Select(p => $"- {p}"))}";
 
-    private bool IsHiddenFileOrDirectory(string path)
+    private static bool IsHiddenFileOrDirectory(string path)
     {
         foreach (var part in path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Skip(1))
         {
@@ -130,7 +129,7 @@ public class MonitoringIgnoreManager
             }
         }
         catch
-        {   
+        {
             // 접근 권한 문제 등으로 인한 예외 발생 시 무시
         }
 

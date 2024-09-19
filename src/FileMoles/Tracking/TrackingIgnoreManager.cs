@@ -1,24 +1,41 @@
 ﻿using FileMoles.Internal;
 
 namespace FileMoles.Tracking;
-
-internal class TrackingIgnoreManager(string ignoreFilePath) : IgnoreManager(ignoreFilePath)
+#if DEBUG
+public
+#else
+internal 
+#endif
+    class TrackingIgnoreManager(string ignoreFilePath) : IgnoreManager(ignoreFilePath)
 {
     protected override string GetDefaultIgnoreContent()
     {
-        return @"# 모든 파일을 무시
+        return @"# All Ignore
 *
+";
+    }
 
-# 텍스트 기반 파일 추적 대상
+    public void IncludeTextFormat()
+    {
+        var ignoreLines = @"
+# Text base Formats
 !*.txt
+!*.md
 
-# ODF
+# Document Formats
 !*.docx
 !*.xlsx
 !*.pptx
-
-# Print
 !*.pdf
 ";
+        AddRules(ignoreLines);
+    }
+
+    public void IncludeFilePath(string filePath)
+    {
+        var relativePath = Path.GetRelativePath(_rootDirectory, filePath);
+        var ignoreLine = $"!{relativePath}";
+
+        AddRules(ignoreLine);
     }
 }

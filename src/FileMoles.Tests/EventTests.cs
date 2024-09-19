@@ -18,7 +18,7 @@ public class EventTests : TestBase
             eventTriggered = true;
         };
 
-        var filePath = await CreateUniqueFileAsync();
+        var filePath = await CreateUniqueTxtFileAsync();
 
         await WaitForEventProcessingAsync();
 
@@ -28,7 +28,7 @@ public class EventTests : TestBase
     [Fact]
     public async Task FileModified_ShouldTriggerEvent()
     {
-        var filePath = await CreateUniqueFileAsync("Initial content");
+        var filePath = await CreateUniqueTxtFileAsync("Initial content");
         output.WriteLine($"Created file: {filePath}");
 
         var eventTriggered = false;
@@ -67,7 +67,7 @@ public class EventTests : TestBase
     [Fact]
     public async Task FileDeleted_ShouldTriggerEvent()
     {
-        var filePath = await CreateUniqueFileAsync();
+        var filePath = await CreateUniqueTxtFileAsync();
 
         var eventTriggered = false;
         FileMole.FileDeleted += (sender, args) =>
@@ -85,7 +85,7 @@ public class EventTests : TestBase
     [Fact]
     public async Task FileRenamed_ShouldTriggerEvent()
     {
-        var originalPath = await CreateUniqueFileAsync();
+        var originalPath = await CreateUniqueTxtFileAsync();
         var newPath = Path.Combine(TestPath, Guid.NewGuid().ToString() + ".txt");
 
         var eventTriggered = false;
@@ -106,7 +106,7 @@ public class EventTests : TestBase
     [Fact]
     public async Task FileChanged_ShouldNotTriggerEventWhenContentUnchanged()
     {
-        var filePath = await CreateUniqueFileAsync("Initial content");
+        var filePath = await CreateUniqueTxtFileAsync("Initial content");
 
         await WaitForEventProcessingAsync();
 
