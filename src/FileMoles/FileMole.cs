@@ -6,8 +6,6 @@ using FileMoles.Interfaces;
 using FileMoles.Tracking;
 using System.Diagnostics;
 using FileMoles.Monitoring;
-using System.Runtime.CompilerServices;
-using NPOI.SS.Formula.Eval;
 
 namespace FileMoles;
 
@@ -47,14 +45,13 @@ public class FileMole : IDisposable
         _options = options;
         this.dbContext = dbContext;
 
-        var dataPath = options.GetDataPath();
-        var ignoreManager = new MonitoringFileIgnoreManager(dataPath);
-
         _fileIndexer = new FileIndexer(dbContext);
-        _fileSystemWatcher = new MonitoringFileSystemWatcher(_fileIndexer, ignoreManager);
+        _fileSystemWatcher = new MonitoringFileSystemWatcher(_fileIndexer);
         _storageProviders = [];
 
-        _trackingManager = new TrackingManager(dbContext, options.DebounceTime);
+        var internalTrackingManager = new InternalTrackingManager(dbContext);
+        _trackingManager = new TrackingManager(options.DebounceTime);
+        _trackingManager.Init(internalTrackingManager);
         _trackingManager.FileContentChanged += OnFileContentChanged;
 
         InitializeStorageProviders();
@@ -101,7 +98,7 @@ public class FileMole : IDisposable
         {
             var sw = Stopwatch.StartNew();
 
-            _ = _trackingManager.InitializeAsync();
+            _ = _trackingManager.RefreshAsync();
 
             await _initialScanner.ScanAsync(_options.Moles.Select(m => m.Path), cancellationToken);
 
@@ -113,30 +110,14 @@ public class FileMole : IDisposable
         }, cancellationToken);
     }
 
-    private async void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
+    private void OnFileContentChanged(object? sender, FileContentChangedEventArgs e)
+    {
+        FileContentChanged?.Invoke(this, e);
+    }
+
+    private static void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
     {
         raiseEvent(e);
-        if (e.FullPath.EndsWith(FileMoleGlobalOptions.HillName))
-        {
-            if (e.ChangeType == WatcherChangeTypes.Created)
-            {
-                var baseDir = Path.GetDirectoryName(e.FullPath)!;
-                var r = this.IsTracking(baseDir);
-                if (r == false)
-                {
-                    await this.TrackingAsync(baseDir);
-                }
-            }
-            else if (e.ChangeType == WatcherChangeTypes.Deleted)
-            {
-                var baseDir = Path.GetDirectoryName(e.FullPath)!;
-                var r = this.IsTracking(baseDir);
-                if (r == true)
-                {
-                    await this.UntrackingAsync(baseDir);
-                }
-            }
-        }
     }
 
     private async Task HandleFileEventAsync(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
@@ -144,7 +125,27 @@ public class FileMole : IDisposable
         raiseEvent(e);
         try
         {
-            await _trackingManager.HandleFileEventAsync(e);
+            if (e.ChangeType == WatcherChangeTypes.Changed)
+            {
+                if (await _trackingManager.IsTrackingAsync(e.FullPath))
+                {
+                    await _trackingManager.HandleFileEventAsync(e);
+                }
+            }
+            else if (e.ChangeType == WatcherChangeTypes.Deleted)
+            {
+                if (await _trackingManager.IsTrackingAsync(e.FullPath))
+                {
+                    await _trackingManager.UntrackingAsync(e.FullPath);
+                }
+            }
+            else if (e.ChangeType == WatcherChangeTypes.Renamed && e.OldFullPath != null)
+            {
+                if (await _trackingManager.IsTrackingAsync(e.OldFullPath))
+                {
+                    await _trackingManager.UntrackingAsync(e.OldFullPath);
+                }
+            }
         }
         catch (ObjectDisposedException)
         {
@@ -197,11 +198,6 @@ public class FileMole : IDisposable
     {
         var args = internalEvent.CreateFileMoleEventArgs();
         FileRenamed?.Invoke(this, args);
-    }
-
-    private void OnFileContentChanged(object? sender, FileContentChangedEventArgs e)
-    {
-        FileContentChanged?.Invoke(this, e);
     }
 
     public async Task<FileInfo> GetFileAsync(string filePath)
@@ -339,20 +335,11 @@ public class FileMole : IDisposable
         return provider!.DeleteAsync(fullPath);
     }
 
-    public Task TrackingAsync(string fullPath)
-    {
-        return _trackingManager.TrackingAsync(fullPath);
-    }
+    public Task TrackingAsync(string filePath) => _trackingManager.TrackingAsync(filePath);
+    
+    public Task UntrackingAsync(string filePath) => _trackingManager.UntrackingAsync(filePath);
 
-    public Task UntrackingAsync(string directory)
-    {
-        return _trackingManager.UntrackingAsync(directory);
-    }
-
-    public bool IsTracking(string filePath)
-    {
-        return _trackingManager.IsTracking(filePath);
-    }
+    public Task<bool> IsTrackingAsync(string filePath) => _trackingManager.IsTrackingAsync(filePath);
 
     protected virtual void Dispose(bool disposing)
     {
@@ -383,7 +370,7 @@ public class FileMole : IDisposable
                         disposableProvider.Dispose();
                     }
                 }
-                _trackingManager.FileContentChanged -= OnFileContentChanged;
+                _trackingManager.FileContentChanged -= FileContentChanged;
                 _trackingManager.Dispose();
             }
 

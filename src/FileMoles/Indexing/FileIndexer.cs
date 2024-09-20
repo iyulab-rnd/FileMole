@@ -1,5 +1,8 @@
 ﻿using FileMoles.Data;
 using FileMoles.Internal;
+using FileMoles.Monitoring;
+using NPOI.HSSF.Record;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace FileMoles.Indexing;
@@ -9,15 +12,9 @@ internal class FileIndexer(DbContext dbContext) : IDisposable
     private readonly DbContext _dbContext = dbContext;
     private bool _disposed;
 
-    public async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
+    private async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        if (file.Attributes.HasFlag(FileAttributes.Directory) ||
-            IOHelper.IsHidden(file.FullName))
-        {
-            return false;
-        }
 
         var fileIndex = FileIndex.CreateNew(file);
         await _dbContext.FileIndices.UpsertAsync(fileIndex, cancellationToken);
@@ -37,7 +34,7 @@ internal class FileIndexer(DbContext dbContext) : IDisposable
 
             var fullPath = Path.Combine(fileIndex.Directory, fileIndex.Name);
             var file = new FileInfo(fullPath);
-            if (file.Exists && !file.Attributes.HasFlag(FileAttributes.Directory))
+            if (file.Exists)
             {
                 yield return file;
             }
@@ -54,7 +51,7 @@ internal class FileIndexer(DbContext dbContext) : IDisposable
 
             if (fileIndex.IsChanged(file))
             {
-                await IndexFileAsync(file, cancellationToken);
+                await TryIndexFileAsync(file, cancellationToken);
             }
         }
         else
@@ -128,11 +125,19 @@ internal class FileIndexer(DbContext dbContext) : IDisposable
         await _dbContext.FileIndices.DeleteEntriesNotScannedAfterAsync(scanStartTime, cancellationToken);
     }
 
+    internal async Task UpdateLastScannedAsync(IEnumerable<FileIndex> fileIndices, CancellationToken cancellationToken = default)
+    {
+        await _dbContext.FileIndices.UpdateLastScannedAsync(fileIndices, cancellationToken);
+    }
+
     internal async Task TryIndexFileAsync(FileInfo fileInfo, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (fileInfo.Attributes.HasFlag(FileAttributes.Directory)) return;
+        if (ShouldIgnore(fileInfo))
+        {
+            return;
+        }
 
         if (await HasFileChangedAsync(fileInfo, cancellationToken))
         {
@@ -140,9 +145,12 @@ internal class FileIndexer(DbContext dbContext) : IDisposable
         }
     }
 
-    internal async Task UpdateLastScannedAsync(IEnumerable<FileIndex> fileIndices, CancellationToken cancellationToken = default)
+    internal static bool ShouldIgnore(FileInfo fileInfo)
     {
-        await _dbContext.FileIndices.UpdateLastScannedAsync(fileIndices, cancellationToken);
+        return fileInfo.Attributes.HasFlag(FileAttributes.Directory)
+            || fileInfo.Attributes.HasFlag(FileAttributes.Hidden)
+            || fileInfo.Name.StartsWith('.')
+            || IOHelper.IsHidden(fileInfo.FullName);
     }
 
     public void Dispose()

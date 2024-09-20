@@ -1,24 +1,27 @@
-﻿using System.Diagnostics;
-
-namespace FileMoles;
+﻿namespace FileMoles;
 
 public class Logger
 {
-    internal static void Info(string message)
+    internal static void Debug(string message, params object?[] args)
     {
-        Debug.WriteLine(message);
+        System.Diagnostics.Debug.WriteLine(message, args);
     }
 
-    internal static void Error(string message)
+    internal static void Info(string message, params object?[] args)
     {
-        Debug.WriteLine(message);
+        System.Diagnostics.Debug.WriteLine(message, args);
     }
 
-    internal static void Error(Exception ex, string? message = null)
+    internal static void Error(string message, params object?[] args)
+    {
+        System.Diagnostics.Debug.WriteLine(message, args);
+    }
+
+    internal static void Error(Exception ex, string? message = null, params object?[] args)
     {
 #if DEBUG
         message ??= ex.Message;
-        Debug.WriteLine(message);
+        System.Diagnostics.Debug.WriteLine(message, args);
         //Debugger.Break();
 #endif
     }

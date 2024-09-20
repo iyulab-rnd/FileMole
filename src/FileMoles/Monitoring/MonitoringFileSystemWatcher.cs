@@ -4,12 +4,9 @@ using FileMoles.Events;
 
 namespace FileMoles.Monitoring;
 
-internal class MonitoringFileSystemWatcher(
-    FileIndexer fileIndexer,
-    MonitoringFileIgnoreManager ignoreManager) : IDisposable
+internal class MonitoringFileSystemWatcher(FileIndexer fileIndexer) : IDisposable
 {
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _watchers = new();
-    private readonly MonitoringFileIgnoreManager _ignoreManager = ignoreManager;
     private readonly FileIndexer _fileIndexer = fileIndexer;
     private readonly TimeSpan _debouncePeriod = TimeSpan.FromMilliseconds(300);
     private readonly ConcurrentDictionary<string, DateTime> _lastEventTime = new();
@@ -89,8 +86,7 @@ internal class MonitoringFileSystemWatcher(
 
         if (_lastEventTime.TryGetValue(fullPath, out var lastTime) && lastTime != eventTime) return;
 
-        if (_ignoreManager.ShouldIgnore(fullPath)) return;
-
+        // 이미 무시된 파일이므로 추가 체크 불필요
         try
         {
             if (Directory.Exists(fullPath))
@@ -108,7 +104,6 @@ internal class MonitoringFileSystemWatcher(
         }
         finally
         {
-            // 완료된 태스크를 딕셔너리에서 제거하여 메모리 누수 방지
             _processingTasks.TryRemove(fullPath, out _);
         }
     }
@@ -117,7 +112,7 @@ internal class MonitoringFileSystemWatcher(
     {
         try
         {
-            if (Directory.Exists(e.FullPath))
+            if (Path.GetFileNameWithoutExtension(e.FullPath).Length < 1)
             {
                 DirectoryDeleted?.Invoke(this, new FileSystemEvent(WatcherChangeTypes.Deleted, e.FullPath));
 
@@ -174,7 +169,7 @@ internal class MonitoringFileSystemWatcher(
                     FileRenamed?.Invoke(this, new FileSystemEvent(changeType, fullPath, oldPath));
 
                     await _fileIndexer.RemoveFileAsync(oldPath);
-                    await _fileIndexer.IndexFileAsync(info);
+                    await _fileIndexer.TryIndexFileAsync(info);
                 }
                 else
                 {

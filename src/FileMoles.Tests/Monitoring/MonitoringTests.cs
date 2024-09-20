@@ -1,11 +1,9 @@
 ﻿using Xunit.Abstractions;
 
-namespace FileMoles.Tests;
+namespace FileMoles.Tests.Monitoring;
 
-public class MonitoringTests : TestBase
+public class MonitoringTests(ITestOutputHelper output) : TestBase(output)
 {
-    public MonitoringTests(ITestOutputHelper output) : base(output) { }
-
     [Fact]
     public async Task FileCreated_ShouldTriggerEvent()
     {

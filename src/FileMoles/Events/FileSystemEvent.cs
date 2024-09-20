@@ -16,8 +16,8 @@ internal class FileSystemEvent
     public FileSystemEvent(WatcherChangeTypes changeType, string fullPath, string? oldFullPath = null)
     {
         ChangeType = changeType;
-        FullPath = IOHelper.NormalizePath(fullPath);
-        OldFullPath = oldFullPath == null ? null : IOHelper.NormalizePath(oldFullPath);
+        FullPath = fullPath;
+        OldFullPath = oldFullPath;
         IsDirectory = Directory.Exists(fullPath);
     }
 

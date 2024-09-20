@@ -1,167 +1,295 @@
-﻿using FileMoles.Internal;
-using GlobExpressions;
+﻿//using FileMoles.Internal;
+//using GlobExpressions;
+//using Microsoft.Extensions.Logging;
 
-namespace FileMoles.Monitoring;
+//namespace FileMoles.Monitoring;
 
-public class MonitoringFileIgnoreManager
-{
-    private readonly List<Glob> _globs = [];
-    private readonly string _configPath;
-    private readonly string _dataPath;
-    private readonly List<string> _patterns = [];
+//public class MonitoringFileIgnoreManager
+//{
+//    private readonly List<(Glob Pattern, bool IsInclude)> _patterns = [];
+//    private readonly string _configPath;
+//    private readonly string _dataPath;
 
-    public MonitoringFileIgnoreManager(string dataPath)
-    {
-        _dataPath = dataPath;
-        _configPath = Path.Combine(dataPath, Constants.IgnoreFileName);
-        if (!File.Exists(_configPath))
-        {
-            File.WriteAllText(_configPath, GetDefaultIgnoresText());
-        }
-        LoadIgnoreFile(_configPath);
-    }
+//    public MonitoringFileIgnoreManager(string dataPath)
+//    {
+//        _dataPath = dataPath;
+//        _configPath = Path.Combine(dataPath, Constants.IgnoreFileName);
 
-    private void LoadIgnoreFile(string path)
-    {
-        foreach (var line in File.ReadLines(path))
-        {
-            var trimmedLine = line.Trim();
-            if (!string.IsNullOrEmpty(trimmedLine) && !trimmedLine.StartsWith('#'))
-            {
-                AddPattern(trimmedLine);
-            }
-        }
-    }
+//        if (!File.Exists(_configPath))
+//        {
+//            File.WriteAllText(_configPath, GetDefaultPatternsText());
+//        }
+//        LoadPatterns(_configPath);
+//    }
 
-    public void AddIgnorePattern(string pattern)
-    {
-        AddPattern(pattern);
-        File.AppendAllText(_configPath, Environment.NewLine + pattern);
-    }
+//    private void LoadPatterns(string path)
+//    {
+//        foreach (var line in File.ReadLines(path))
+//        {
+//            var trimmedLine = line.Trim();
+//            if (string.IsNullOrEmpty(trimmedLine) || trimmedLine.StartsWith('#'))
+//                continue;
 
-    private void AddPattern(string pattern)
-    {
-        bool isIncludePattern = pattern.StartsWith('!');
-        string adjustedPattern = isIncludePattern
-            ? pattern[1..]  // '!' 제거 후 패턴 적용
-            : pattern;
+//            bool isInclude = trimmedLine.StartsWith('!');
+//            string pattern = isInclude ? trimmedLine[1..] : trimmedLine;
+//            string adjustedPattern = AdjustPattern(pattern);
 
-        adjustedPattern = adjustedPattern.EndsWith('/')
-            ? $"**/{adjustedPattern}**"
-            : $"**/{adjustedPattern}";
+//            try
+//            {
+//                var glob = new Glob(adjustedPattern, GlobOptions.CaseInsensitive);
+//                _patterns.Add((glob, isInclude));
+//            }
+//            catch (GlobPatternException ex)
+//            {
+//                Logger.Error($"Invalid glob pattern '{pattern}' in config: {ex.Message}");
+//            }
+//        }
+//    }
 
-        var globPattern = new Glob(adjustedPattern, GlobOptions.CaseInsensitive);
 
-        if (isIncludePattern)
-        {
-            // '!' 패턴은 무시 리스트에서 제외할 항목이므로, 가장 마지막에 추가
-            _globs.Insert(0, globPattern);
-        }
-        else
-        {
-            _globs.Add(globPattern);
-        }
+//    /// <summary>
+//    /// 패턴을 추가합니다. 패턴의 첫 문자가 '!'이면 포함 패턴으로, 그렇지 않으면 무시 패턴으로 처리됩니다.
+//    /// </summary>
+//    /// <param name="pattern">추가할 패턴</param>
+//    public void AddPattern(string pattern)
+//    {
+//        File.AppendAllText(_configPath, Environment.NewLine + pattern);
+//        bool isInclude = pattern.StartsWith('!');
+//        string p = isInclude ? pattern[1..] : pattern;
+//        string adjustedPattern = AdjustPattern(p);
 
-        _patterns.Add((isIncludePattern ? "!" : "") + adjustedPattern);
-    }
+//        try
+//        {
+//            var glob = new Glob(adjustedPattern, GlobOptions.CaseInsensitive);
+//            _patterns.Add((glob, isInclude));
+//        }
+//        catch (GlobPatternException ex)
+//        {
+//            Logger.Error($"Invalid glob pattern '{pattern}': {ex.Message}");
+//        }
+//    }
 
-    public bool ShouldIgnore(string path)
-    {
-        string fullPath = IOHelper.NormalizePath(Path.Combine(_dataPath, path));
-        if (IsHiddenFileOrDirectory(fullPath))
-        {
-            return true;
-        }
-        string relativePath = Path.GetRelativePath(_dataPath, fullPath).Replace('\\', '/');
+//    /// <summary>
+//    /// 주어진 경로가 무시 대상인지 여부를 반환합니다.
+//    /// </summary>
+//    /// <param name="path">확인할 파일 경로</param>
+//    /// <returns>무시해야 하면 true, 아니면 false</returns>
+//    public bool ShouldIgnore(string path)
+//    {
+//        string fullPath = IOHelper.NormalizePath(Path.Combine(_dataPath, path));
+//        if (IsHiddenFileOrDirectory(fullPath))
+//            return true;
 
-        // 포함 패턴을 우선 처리
-        foreach (var glob in _globs)
-        {
-            bool isMatch = glob.IsMatch(relativePath);
-            if (isMatch)
-            {
-                // 포함 패턴이면 무시하지 않음
-                if (_patterns[_globs.IndexOf(glob)].StartsWith('!'))
-                {
-                    return false;
-                }
-                // 무시 패턴이면 true 반환
-                return true;
-            }
-        }
+//        string relativePath = Path.GetRelativePath(_dataPath, fullPath).Replace('\\', '/');
 
-        return false;
-    }
+//        bool ignore = false;
+//        foreach (var (pattern, isInclude) in _patterns)
+//        {
+//            try
+//            {
+//                if (pattern.IsMatch(relativePath))
+//                {
+//                    ignore = !isInclude;
+//                }
+//            }
+//            catch (Exception)
+//            {
+//            }
+//        }
 
-    public string GetPatternsDebugInfo() =>
-        $"Current patterns:{Environment.NewLine}{string.Join(Environment.NewLine, _patterns.Select(p => $"- {p}"))}";
+//        return ignore;
+//    }
 
-    private static bool IsHiddenFileOrDirectory(string path)
-    {
-        foreach (var part in path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Skip(1))
-        {
-            path = Path.Combine(path, part);
-            if (IsHiddenEntry(path))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
+//    /// <summary>
+//    /// 현재 패턴들의 디버그 정보를 반환합니다.
+//    /// </summary>
+//    /// <returns>패턴 목록 문자열</returns>
+//    public string GetPatternsDebugInfo() =>
+//        $"Current patterns:{Environment.NewLine}{string.Join(Environment.NewLine, _patterns.Select(p => $"{(p.IsInclude ? "Include" : "Ignore")}: {p.Pattern.Pattern}"))}";
 
-    private static bool IsHiddenEntry(string path)
-    {
-        if (Path.GetFileName(path).StartsWith(".", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+//    /// <summary>
+//    /// 파일 또는 디렉터리가 숨김 속성인지 확인합니다.
+//    /// </summary>
+//    /// <param name="path">확인할 경로</param>
+//    /// <returns>숨김이면 true, 아니면 false</returns>
+//    private static bool IsHiddenFileOrDirectory(string path)
+//    {
+//        foreach (var part in path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Skip(1))
+//        {
+//            path = Path.Combine(path, part);
+//            if (IsHiddenEntry(path))
+//                return true;
+//        }
+//        return false;
+//    }
 
-        try
-        {
-            if (File.Exists(path))
-            {
-                return new FileInfo(path).Attributes.HasFlag(FileAttributes.Hidden);
-            }
-            if (Directory.Exists(path))
-            {
-                var dirInfo = new DirectoryInfo(path);
-                return dirInfo.Parent != null && dirInfo.Attributes.HasFlag(FileAttributes.Hidden);
-            }
-        }
-        catch
-        {
-            // 접근 권한 문제 등으로 인한 예외 발생 시 무시
-        }
+//    /// <summary>
+//    /// 단일 파일 또는 디렉터리가 숨김 속성인지 확인합니다.
+//    /// </summary>
+//    /// <param name="path">확인할 경로</param>
+//    /// <returns>숨김이면 true, 아니면 false</returns>
+//    private static bool IsHiddenEntry(string path)
+//    {
+//        if (Path.GetFileName(path).StartsWith(".", StringComparison.OrdinalIgnoreCase))
+//            return true;
 
-        return false;
-    }
+//        try
+//        {
+//            if (File.Exists(path))
+//            {
+//                return new FileInfo(path).Attributes.HasFlag(FileAttributes.Hidden);
+//            }
+//            if (Directory.Exists(path))
+//            {
+//                var dirInfo = new DirectoryInfo(path);
+//                return dirInfo.Parent != null && dirInfo.Attributes.HasFlag(FileAttributes.Hidden);
+//            }
+//        }
+//        catch
+//        {
+//            // 접근 권한 문제 등으로 인한 예외 발생 시 무시
+//        }
 
-    private static string GetDefaultIgnoresText() => @"# Generals
-*.tmp
-*.temp
-*.bak
-*.swp
-*~
-*.log
-logs/
+//        return false;
+//    }
 
-# Coding
-node_modules/
-build/
-dist/
-bin/
-obj/
-packages/
+//    /// <summary>
+//    /// 패턴을 조정하여 Glob 패턴 형식으로 변환합니다.
+//    /// </summary>
+//    /// <param name="pattern">원본 패턴</param>
+//    /// <returns>조정된 패턴</returns>
+//    private static string AdjustPattern(string pattern) =>
+//        pattern.EndsWith('/')
+//            ? $"**/{pattern}**"
+//            : $"**/{pattern}";
 
-# Database
-*.db
-*.db-*
-*.sqlite
-*.sqlite3
-*.mdf
-*.ldf
+//    /// <summary>
+//    /// 기본 패턴 텍스트를 반환합니다.
+//    /// </summary>
+//    /// <returns>기본 패턴 문자열</returns>
+//    /// <summary>
+//    /// 기본 패턴 텍스트를 반환합니다.
+//    /// </summary>
+//    /// <returns>기본 패턴 문자열</returns>
+//    private static string GetDefaultPatternsText() => @"
+//# All Ignore 
+//*
 
-# System
-AppData/
-";
-}
+//# Include Document Formats
+//!*.doc
+//!*.docx
+//!*.xls
+//!*.xlsx
+//!*.ppt
+//!*.pptx
+//!*.pdf
+//!*.odt
+//!*.ods
+//!*.odp
+//!*.rtf
+//!*.tex
+//!*.hwp
+//!*.hwpx
+
+//# Include Text Formats
+//!*.txt
+//!*.md
+//!*.csv
+//!*.json
+//!*.xml
+//!*.log
+//!*.ini
+//!*.cfg
+//!*.conf
+
+//# Include E-Book Formats
+//!*.epub
+//!*.mobi
+//!*.azw3
+
+//# Include Programming and Markup Languages
+//!*.cs
+//!*.java
+//!*.py
+//!*.js
+//!*.html
+//!*.css
+//!*.php
+//!*.rb
+//!*.go
+//!*.swift
+//!*.kt
+//!*.ts
+
+//# Include Configuration and Script Files
+//!*.sh
+//!*.bat
+//!*.ps1
+//!*.yaml
+//!*.yml
+//!*.dockerfile
+//!*.makefile
+
+//# Include LaTeX Files
+//!*.bib
+//!*.cls
+//!*.sty
+//!*.dtx
+//!*.ins
+
+//# Include Other Text-Based Formats
+//!*.properties
+//!*.mdown
+//!*.markdown
+//!*.rst
+//!*.adoc
+//!*.asc
+
+//# Include Image Formats
+//!*.jpg
+//!*.jpeg
+//!*.png
+//!*.gif
+//!*.bmp
+//!*.tiff
+//!*.svg
+//!*.webp
+//!*.ico
+
+//# Include Video Formats
+//!*.mp4
+//!*.mkv
+//!*.avi
+//!*.mov
+//!*.wmv
+//!*.flv
+//!*.webm
+//!*.mpeg
+//!*.mpg
+//!*.m4v
+
+//# Include Audio Formats
+//!*.mp3
+//!*.wav
+//!*.flac
+//!*.aac
+//!*.ogg
+//!*.wma
+//!*.m4a
+//!*.aiff
+//!*.alac
+//!*.opus
+
+//# Include Archive Formats
+//!*.zip
+//!*.rar
+//!*.7z
+//!*.tar
+//!*.gz
+//!*.bz2
+//!*.xz
+//!*.iso
+//!*.cab
+//!*.arj
+//";
+//}

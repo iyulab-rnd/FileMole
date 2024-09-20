@@ -1,12 +1,24 @@
 ﻿using DiffPlex.DiffBuilder.Model;
 using DiffPlex.DiffBuilder;
 using DiffPlex;
+using System.Text;
 
 namespace FileMoles.Diff;
 
 public class TextDiffResult : DiffResult
 {
     public List<TextDiffEntry> Entries { get; set; } = [];
+
+    public override string ToString()
+    {
+        var sb = new StringBuilder();
+        foreach (var entry in Entries)
+        {
+            sb.AppendLine($"[{entry.Type}] {entry.StartPosition}-{entry.EndPosition}: {entry.OriginalText}");
+        }
+
+        return sb.ToString();
+    }
 }
 
 public class TextDiffEntry

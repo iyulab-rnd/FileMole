@@ -3,12 +3,12 @@
 internal class DbContext : UnitOfWork
 {
     public FileIndexRepository FileIndices { get; }
-    public TrackingDirRepository TrackingDirs { get; }
+    public TrackingFileRepository TrackingFiles { get; }
 
     private DbContext(string dbPath) : base(dbPath)
     {
         FileIndices = new FileIndexRepository(this);
-        TrackingDirs = new TrackingDirRepository(this);
+        TrackingFiles = new TrackingFileRepository(this);
     }
 
     public static async Task<DbContext> CreateAsync(string dbPath)

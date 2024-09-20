@@ -1,5 +1,7 @@
 ﻿using System.Collections.Concurrent;
 
+namespace FileMoles.Internal;
+
 public class Debouncer<TKey, TValue> : IDisposable
     where TKey : notnull
 {
@@ -49,5 +51,7 @@ public class Debouncer<TKey, TValue> : IDisposable
             cts.Dispose();
         }
         _items.Clear();
+
+        GC.SuppressFinalize(this);
     }
 }
