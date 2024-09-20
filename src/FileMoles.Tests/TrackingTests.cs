@@ -13,7 +13,7 @@ public class TrackingTests(ITestOutputHelper output) : TestBase(output)
         var contentChanged = false;
         FileMole.FileContentChanged += (sender, e) => contentChanged = true;
 
-        await SafeFileIO.AppendAllTextAsync(filePath, "New content");
+        await RetryFile.AppendAllTextAsync(filePath, "New content");
 
         await Task.Delay(TimeSpan.FromSeconds(2)); // Wait for debounce
         Assert.True(contentChanged);
@@ -29,7 +29,7 @@ public class TrackingTests(ITestOutputHelper output) : TestBase(output)
         FileMole.FileContentChanged += (sender, e) => contentChanged = true;
 
         var tmpFilePath = Path.ChangeExtension(filePath, ".tmp");
-        await SafeFileIO.WriteAllTextAsync(tmpFilePath, "Temp content");
+        await RetryFile.WriteAllTextAsync(tmpFilePath, "Temp content");
 
         await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
         Assert.False(contentChanged);
@@ -44,14 +44,14 @@ public class TrackingTests(ITestOutputHelper output) : TestBase(output)
         var contentChanged = false;
         FileMole.FileContentChanged += (sender, e) => contentChanged = true;
 
-        await SafeFileIO.AppendAllTextAsync(filePath, "New content");
+        await RetryFile.AppendAllTextAsync(filePath, "New content");
 
         await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
         Assert.True(contentChanged);
 
         contentChanged = false;
         var nonMatchingPath = Path.ChangeExtension(filePath, ".log");
-        await SafeFileIO.WriteAllTextAsync(nonMatchingPath, "Log content");
+        await RetryFile.WriteAllTextAsync(nonMatchingPath, "Log content");
 
         await Task.Delay(TimeSpan.FromSeconds(1)); // Wait for debounce
         Assert.False(contentChanged);
@@ -68,7 +68,7 @@ public class TrackingTests(ITestOutputHelper output) : TestBase(output)
 
         for (int i = 0; i < 5; i++)
         {
-            await SafeFileIO.AppendAllTextAsync(filePath, $"Content {i}");
+            await RetryFile.AppendAllTextAsync(filePath, $"Content {i}");
             await Task.Delay(50); // Small delay between changes
         }
 

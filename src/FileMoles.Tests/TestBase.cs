@@ -1,4 +1,5 @@
-﻿using Xunit.Abstractions;
+﻿using System.Diagnostics;
+using Xunit.Abstractions;
 
 namespace FileMoles.Tests;
 
@@ -40,7 +41,7 @@ public abstract class TestBase : IDisposable
     protected async Task<string> CreateUniqueTxtFileAsync(string content = "test")
     {
         string filePath = Path.Combine(TestPath, Guid.NewGuid().ToString() + ".txt");
-        await SafeFileIO.WriteAllTextAsync(filePath, content);
+        await RetryFile.WriteAllTextAsync(filePath, content);
         return filePath;
     }
 
@@ -49,10 +50,11 @@ public abstract class TestBase : IDisposable
         FileMole.Dispose();
         try
         {
-            SafeFileIO.DeleteAsync(TestPath).GetAwaiter().GetResult();
+            RetryFile.DeleteAsync(TestPath).GetAwaiter().GetResult();
         }
-        catch (Exception)
+        catch
         {
+            // ignore
         }
 
         GC.SuppressFinalize(this);

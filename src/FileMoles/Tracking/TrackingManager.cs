@@ -1,7 +1,9 @@
 ﻿using FileMoles.Data;
 using FileMoles.Diff;
 using FileMoles.Events;
+using FileMoles.Internal;
 using System.Collections.Concurrent;
+using System.Linq;
 
 namespace FileMoles.Tracking;
 
@@ -23,60 +25,134 @@ internal class TrackingManager(DbContext dbContext, int debounceTime) : IDisposa
         var dirs = await _dbContext.TrackingDirs.GetAllAsync();
         foreach (var dir in dirs)
         {
-            var manager = await TrackingDirectoryManager.CreateByDirectoryAsync(dir.Path, _dbContext);
-            _trackingDirs.TryAdd(dir.Path, manager);
+            await TrackingAsync(dir.Path);
         }
     }
 
     public async Task TrackingAsync(string path)
     {
-        if (_trackingDirs.ContainsKey(path))
-            return;
+        var normalizedPath = IOHelper.NormalizePath(path);
 
-        if (Directory.Exists(path))
+        if (Directory.Exists(normalizedPath))
         {
-            var manager = await TrackingDirectoryManager.CreateByDirectoryAsync(path, _dbContext);
-            _trackingDirs.TryAdd(path, manager);
+            var manager = await TrackingDirectoryManager.CreateByDirectoryAsync(normalizedPath, _dbContext);
+            _trackingDirs.TryAdd(normalizedPath, manager);
         }
-        else if (File.Exists(path))
+        else if (File.Exists(normalizedPath))
         {
-            var dirPath = Path.GetDirectoryName(path)!;
-            var manager = await TrackingDirectoryManager.CreateByFileAsync(path, _dbContext);
-            _trackingDirs.TryAdd(dirPath, manager);
+            var dirPath = Path.GetDirectoryName(normalizedPath)!;
+
+            if (_trackingDirs.TryGetValue(dirPath, out TrackingDirectoryManager? cachedManager))
+            {
+                await cachedManager.TrackingFileAsync(normalizedPath);
+            }
+            else
+            {
+                var manager = await TrackingDirectoryManager.CreateByFileAsync(normalizedPath, _dbContext);
+                _trackingDirs.TryAdd(dirPath, manager);
+            }
         }
-        else
-            throw new FileNotFoundException(path);
     }
 
     public async Task UntrackingAsync(string path)
     {
-        if (_trackingDirs.TryRemove(path, out var manager))
+        var normalizedPath = IOHelper.NormalizePath(path);
+
+        if (Directory.Exists(normalizedPath))
         {
-            await manager.UntrackingAsync();
+            if (_trackingDirs.TryRemove(normalizedPath, out var manager))
+            {
+                await manager.UntrackingAsync();
+            }
+            else
+            {
+                var hillPath = Path.Combine(normalizedPath, FileMoleGlobalOptions.HillName);
+                if (Directory.Exists(hillPath))
+                {
+                    try
+                    {
+                        await RetryFile.DeleteAsync(hillPath);
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+
+                var ignoreFilePath = Path.Combine(normalizedPath, FileMoleGlobalOptions.IgnoreFileName);
+                if (File.Exists(ignoreFilePath))
+                {
+                    try
+                    {
+                        await RetryFile.DeleteAsync(ignoreFilePath);
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+        }
+        else if(File.Exists(normalizedPath))
+        {
+            var dir = Path.GetDirectoryName(normalizedPath)!;
+            if (_trackingDirs.TryRemove(dir, out var manager))
+            {
+                await manager.UntrackingFileAsync(normalizedPath);
+            }
+            else
+            {
+            }
         }
     }
 
-    public Task<bool> IsTrackingFileAsync(string filePath)
+    public bool IsTracking(string filePath)
     {
-        var normalizedFilePath = Path.GetFullPath(filePath);
-        foreach (var dirManager in _trackingDirs.Values)
+        var normalizedPath = IOHelper.NormalizePath(filePath);
+        if (Directory.Exists(normalizedPath))
         {
-            var normalizedDirPath = Path.GetFullPath(dirManager.DirectoryPath);
-            if (normalizedFilePath.StartsWith(normalizedDirPath) && !dirManager.IsIgnored(normalizedFilePath))
-                return Task.FromResult(true);
+            return _trackingDirs.ContainsKey(normalizedPath);
         }
+        else if (File.Exists(normalizedPath))
+        {
+            var dir = Path.GetDirectoryName(normalizedPath)!;
+            var manager = _trackingDirs.GetValueOrDefault(dir);
+            if (manager == null) return false;
 
-        return Task.FromResult(false);
+            return manager.IsTrackingFile(normalizedPath);
+        }
+        else
+            throw new FileNotFoundException(filePath);
     }
 
-    public async Task HandleFileEventAsync(FileSystemEvent e)
+    internal async Task HandleFileEventAsync(FileSystemEvent e)
     {
         foreach (var manager in _trackingDirs.Values)
         {
             if (e.FullPath.StartsWith(manager.DirectoryPath) && !manager.IsIgnored(e.FullPath))
             {
-                await _debouncer.DebounceAsync(e.FullPath, e, ProcessDebouncedEventAsync);
-                break;
+                if (e.ChangeType == WatcherChangeTypes.Created)
+                {
+                    await manager.TrackingFileAsync(e.FullPath);
+                    break;
+                }
+                else if (e.ChangeType == WatcherChangeTypes.Changed)
+                {
+                    await _debouncer.DebounceAsync(e.FullPath, e, ProcessDebouncedEventAsync);
+                    break;
+                }
+                else if (e.ChangeType == WatcherChangeTypes.Renamed)
+                {
+                    if (e.OldFullPath != null)
+                    {
+                        await manager.UntrackingFileAsync(e.OldFullPath);
+                    }
+                    await manager.TrackingFileAsync(e.FullPath);
+                    break;
+                }
+                else if (e.ChangeType == WatcherChangeTypes.Deleted)
+                {
+                    await manager.UntrackingFileAsync(e.FullPath);
+                    break;
+                }
             }
         }
     }
@@ -102,7 +178,7 @@ internal class TrackingManager(DbContext dbContext, int debounceTime) : IDisposa
                 }
             }
 
-            await manager.BackupFileAsync(e.FullPath);
+            await manager.TrackingFileAsync(e.FullPath);
         }
     }
 

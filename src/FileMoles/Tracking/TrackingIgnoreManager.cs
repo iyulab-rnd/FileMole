@@ -1,13 +1,13 @@
 ﻿using FileMoles.Internal;
 
 namespace FileMoles.Tracking;
-#if DEBUG
-public
-#else
-internal 
-#endif
-    class TrackingIgnoreManager(string ignoreFilePath) : IgnoreManager(ignoreFilePath)
+
+public class TrackingIgnoreManager : IgnoreManager
 {
+    protected TrackingIgnoreManager(string ignoreFilePath) : base(ignoreFilePath)
+    {
+    }
+
     protected override string GetDefaultIgnoreContent()
     {
         return @"# All Ignore
@@ -15,7 +15,14 @@ internal
 ";
     }
 
-    public void IncludeTextFormat()
+    public override bool IsIgnored(string filePath)
+    {
+        if (IOHelper.IsHidden(filePath)) return true;
+
+        return base.IsIgnored(filePath);
+    }
+
+    public Task IncludeTextFormatsAsync()
     {
         var ignoreLines = @"
 # Text base Formats
@@ -28,14 +35,37 @@ internal
 !*.pptx
 !*.pdf
 ";
-        AddRules(ignoreLines);
+        return AddRulesAsync(ignoreLines);
     }
 
-    public void IncludeFilePath(string filePath)
+    public Task IncludeFilePathAsync(string filePath)
     {
         var relativePath = Path.GetRelativePath(_rootDirectory, filePath);
         var ignoreLine = $"!{relativePath}";
 
-        AddRules(ignoreLine);
+        return AddRulesAsync(ignoreLine);
+    }
+
+    internal Task ExcludeFilePathAsync(string filePath)
+    {
+        var relativePath = Path.GetRelativePath(_rootDirectory, filePath);
+        var ignoreLine = $"!{relativePath}";
+
+        return RemoveRulesAsync(ignoreLine);
+    }
+
+    new public static async Task<TrackingIgnoreManager> CreateAsync(string ignoreFilePath)
+    {
+        var manager = new TrackingIgnoreManager(ignoreFilePath);
+        await manager.InitializeAsync();
+        return manager;
+    }
+
+    new public static TrackingIgnoreManager CreateNew(string ignoreFilePath)
+    {
+        var manager = new TrackingIgnoreManager(ignoreFilePath);
+        _ = manager.InitializeAsync();
+        Task.Delay(300).Wait();
+        return manager;
     }
 }

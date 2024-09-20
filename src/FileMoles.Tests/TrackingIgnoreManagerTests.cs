@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using FileMoles.Tracking;
 using Xunit;
 
@@ -27,11 +28,11 @@ public class TrackingIgnoreManagerTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_ShouldCreateIgnoreFileWithDefaultContent()
+    public async Task Constructor_ShouldCreateIgnoreFileWithDefaultContent()
     {
         // Act
-        var manager = new TrackingIgnoreManager(ignoreFilePath);
-        manager.IncludeTextFormat();
+        var manager = await TrackingIgnoreManager.CreateAsync(ignoreFilePath);
+        await manager.IncludeTextFormatsAsync();
 
         // Assert
         Assert.True(File.Exists(ignoreFilePath));
@@ -46,11 +47,11 @@ public class TrackingIgnoreManagerTests : IDisposable
     }
 
     [Fact]
-    public void IsIgnored_ShouldIgnoreAllFilesExceptSpecified()
+    public async Task IsIgnored_ShouldIgnoreAllFilesExceptSpecified()
     {
         // Arrange
-        var manager = new TrackingIgnoreManager(ignoreFilePath);
-        manager.IncludeTextFormat();
+        var manager = await TrackingIgnoreManager.CreateAsync(ignoreFilePath);
+        await manager.IncludeTextFormatsAsync();
 
         // Act & Assert
         Assert.False(manager.IsIgnored(Path.Combine(testPath, "file.txt")));
@@ -63,16 +64,16 @@ public class TrackingIgnoreManagerTests : IDisposable
     }
 
     [Fact]
-    public void AddRule_ShouldAddNewRuleToIgnoreFile()
+    public async Task AddRule_ShouldAddNewRuleToIgnoreFile()
     {
         // Arrange
-        var manager = new TrackingIgnoreManager(ignoreFilePath);
-        manager.IncludeTextFormat();
+        var manager = await TrackingIgnoreManager.CreateAsync(ignoreFilePath);
+        await manager.IncludeTextFormatsAsync();
 
         var newRule = "!*.csv";
 
         // Act
-        manager.AddRules(newRule);
+        await manager.AddRulesAsync(newRule);
 
         // Assert
         var rules = manager.GetRules().ToList();
@@ -85,16 +86,16 @@ public class TrackingIgnoreManagerTests : IDisposable
     }
 
     [Fact]
-    public void RemoveRule_ShouldRemoveExistingRuleFromIgnoreFile()
+    public async Task RemoveRule_ShouldRemoveExistingRuleFromIgnoreFile()
     {
         // Arrange
-        var manager = new TrackingIgnoreManager(ignoreFilePath);
-        manager.IncludeTextFormat();
+        var manager = await TrackingIgnoreManager.CreateAsync(ignoreFilePath);
+        await manager.IncludeTextFormatsAsync();
 
         var ruleToRemove = "!*.txt";
 
         // Act
-        manager.RemoveRules(ruleToRemove);
+        await manager.RemoveRulesAsync(ruleToRemove);
 
         // Assert
         var rules = manager.GetRules().ToList();
@@ -107,11 +108,11 @@ public class TrackingIgnoreManagerTests : IDisposable
     }
 
     [Fact]
-    public void GetRules_ShouldReturnAllNonCommentRules()
+    public async Task GetRules_ShouldReturnAllNonCommentRules()
     {
         // Arrange
-        var manager = new TrackingIgnoreManager(ignoreFilePath);
-        manager.IncludeTextFormat();
+        var manager = await TrackingIgnoreManager.CreateAsync(ignoreFilePath);
+        await manager.IncludeTextFormatsAsync();
 
         // Act
         var rules = manager.GetRules().ToList();
@@ -131,8 +132,8 @@ public class TrackingIgnoreManagerTests : IDisposable
     public async Task IsIgnored_ShouldRespectNestedIgnoreFiles()
     {
         // Arrange
-        var manager = new TrackingIgnoreManager(ignoreFilePath);
-        manager.IncludeTextFormat();
+        var manager = await TrackingIgnoreManager.CreateAsync(ignoreFilePath);
+        await manager.IncludeTextFormatsAsync();
 
         var subDir = Path.Combine(testPath, "subdir");
         Directory.CreateDirectory(subDir);

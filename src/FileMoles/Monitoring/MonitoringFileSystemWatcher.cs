@@ -52,8 +52,6 @@ internal class MonitoringFileSystemWatcher(
 
     private async void OnCreated(object sender, FileSystemEventArgs e)
     {
-        if (_ignoreManager.ShouldIgnore(e.FullPath)) return;
-
         try
         {
             if (Directory.Exists(e.FullPath))
@@ -117,8 +115,6 @@ internal class MonitoringFileSystemWatcher(
 
     private async void OnDeleted(object sender, FileSystemEventArgs e)
     {
-        if (_ignoreManager.ShouldIgnore(e.FullPath)) return;
-
         try
         {
             if (Directory.Exists(e.FullPath))
@@ -141,8 +137,6 @@ internal class MonitoringFileSystemWatcher(
 
     private async void OnRenamed(object sender, RenamedEventArgs e)
     {
-        if (_ignoreManager.ShouldIgnore(e.FullPath) || _ignoreManager.ShouldIgnore(e.OldFullPath)) return;
-
         try
         {
             if (Directory.Exists(e.FullPath))

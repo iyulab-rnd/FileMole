@@ -67,7 +67,7 @@ public class MonitoringFileIgnoreManager
 
     public bool ShouldIgnore(string path)
     {
-        string fullPath = Path.GetFullPath(Path.Combine(_dataPath, path));
+        string fullPath = IOHelper.NormalizePath(Path.Combine(_dataPath, path));
         if (IsHiddenFileOrDirectory(fullPath))
         {
             return true;

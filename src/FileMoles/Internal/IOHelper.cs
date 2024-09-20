@@ -106,4 +106,45 @@ internal static class IOHelper
             }
         }
     }
+
+    public static string NormalizePath(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return path;
+
+        // Step 1: Convert to absolute path
+        path = Path.GetFullPath(path);
+
+        // Step 2: Normalize directory separators
+        path = path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+
+        // Step 3: Remove trailing separators
+        path = path.TrimEnd(Path.DirectorySeparatorChar);
+
+        // Step 4: Normalize case (only for Windows)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            path = path.ToLowerInvariant();
+        }
+
+        // Step 5: Handle root paths
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            // For Windows, ensure drive letter is uppercase
+            if (path.Length >= 2 && path[1] == ':')
+            {
+                path = char.ToLowerInvariant(path[0]) + path[1..];
+            }
+        }
+        else
+        {
+            // For Unix-like systems, ensure it starts with '/'
+            if (!path.StartsWith('/'))
+            {
+                path = "/" + path;
+            }
+        }
+
+        return path;
+    }
 }

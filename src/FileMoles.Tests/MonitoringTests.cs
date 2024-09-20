@@ -25,7 +25,7 @@ public class MonitoringTests : TestBase
         var eventTriggered = false;
         FileMole.FileChanged += (sender, e) => eventTriggered = true;
 
-        await SafeFileIO.AppendAllTextAsync(filePath, "New content");
+        await RetryFile.AppendAllTextAsync(filePath, "New content");
 
         await Task.Delay(700); // Wait for event to be processed
         Assert.True(eventTriggered);
@@ -38,7 +38,7 @@ public class MonitoringTests : TestBase
         var eventTriggered = false;
         FileMole.FileDeleted += (sender, e) => eventTriggered = true;
 
-        await SafeFileIO.DeleteAsync(filePath);
+        await RetryFile.DeleteAsync(filePath);
 
         await Task.Delay(700); // Wait for event to be processed
         Assert.True(eventTriggered);

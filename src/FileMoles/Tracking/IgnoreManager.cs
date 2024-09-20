@@ -1,18 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using GlobExpressions;
 
 namespace FileMoles.Internal;
 
-#if DEBUG // for testing
-public
-#else
-internal
-#endif
-partial class IgnoreManager : IDisposable
+public partial class IgnoreManager : IDisposable
 {
     private readonly string _ignoreFilePath;
     private readonly List<PatternEntry> _patterns = [];
@@ -20,35 +11,39 @@ partial class IgnoreManager : IDisposable
     protected readonly string _rootDirectory;
     private bool _isInternalChange = false;
     private CancellationTokenSource? _debounceTokenSource;
-    private const int DebounceDelay = 500; // milliseconds
+    private const int DebounceDelay = 200; // milliseconds
 
-    public IgnoreManager(string ignoreFilePath)
+    protected IgnoreManager(string ignoreFilePath)
     {
         _ignoreFilePath = ignoreFilePath;
         var dir = Path.GetDirectoryName(_ignoreFilePath)!;
         IOHelper.CreateDirectory(dir);
 
-        if (dir.EndsWith(FileMoleGlobalOptions.HillName))
-        {
-            var dirInfo = new DirectoryInfo(dir);
-            _rootDirectory = dirInfo.Parent!.FullName;
-        }
-        else
-        {
-            _rootDirectory = dir;
-        }
-
-        EnsureIgnoreFileExists();
-        LoadPatterns();
+        _rootDirectory = dir;
         _watcher = SetupWatcher();
     }
 
-    private void EnsureIgnoreFileExists()
+    internal async Task InitializeAsync()
     {
-        if (!File.Exists(_ignoreFilePath))
+        if (File.Exists(_ignoreFilePath))
         {
-            var defaultContent = GetDefaultIgnoreContent();
-            File.WriteAllText(_ignoreFilePath, defaultContent);
+            LoadPatterns();
+        }
+        else
+        {
+            _isInternalChange = true;
+
+            try
+            {
+                var defaultContent = GetDefaultIgnoreContent();
+                await RetryFile.WriteAllTextAsync(_ignoreFilePath, defaultContent);
+
+                LoadPatterns();
+            }
+            finally
+            {
+                _isInternalChange = false;
+            }
         }
     }
 
@@ -56,7 +51,6 @@ partial class IgnoreManager : IDisposable
     {
         return string.Empty;
     }
-
 
     private FileSystemWatcher SetupWatcher()
     {
@@ -76,7 +70,7 @@ partial class IgnoreManager : IDisposable
         return watcher;
     }
 
-    protected void LoadPatterns()
+    private void LoadPatterns()
     {
         ClearPatterns();
         var directories = GetAllDirectories(_rootDirectory);
@@ -173,13 +167,16 @@ partial class IgnoreManager : IDisposable
 
     private static IEnumerable<string> GetAllDirectories(string rootDirectory)
     {
+        if (Directory.Exists(rootDirectory) == false) return [];
+
         var directories = Directory.GetDirectories(rootDirectory, "*", SearchOption.AllDirectories);
         return new[] { rootDirectory }.Concat(directories);
     }
 
-    public bool IsIgnored(string filePath)
+    public virtual bool IsIgnored(string filePath)
     {
         var fileDirectory = Path.GetDirectoryName(filePath)!;
+        if (fileDirectory.Length == 0) fileDirectory = _rootDirectory;
 
         bool? ignored = null;
 
@@ -208,8 +205,10 @@ partial class IgnoreManager : IDisposable
 
     private static bool IsSubPath(string baseDir, string fileDir)
     {
-        var baseFullPath = Path.GetFullPath(baseDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var fileFullPath = Path.GetFullPath(fileDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (string.IsNullOrEmpty(fileDir)) return false;
+
+        var baseFullPath = IOHelper.NormalizePath(baseDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fileFullPath = IOHelper.NormalizePath(fileDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
         return fileFullPath.StartsWith(baseFullPath, StringComparison.OrdinalIgnoreCase);
     }
@@ -226,7 +225,7 @@ partial class IgnoreManager : IDisposable
             .Where(line => !string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith('#'));
     }
 
-    public void AddRules(string rules)
+    public async Task AddRulesAsync(string rules)
     {
         if (string.IsNullOrWhiteSpace(rules))
         {
@@ -236,52 +235,49 @@ partial class IgnoreManager : IDisposable
         _isInternalChange = true;
         try
         {
-            var existingContent = File.ReadAllLines(_ignoreFilePath).ToList();
+            var existingContent = await RetryFile.ReadAllLinesAsync(_ignoreFilePath);
+            var existingRules = new HashSet<string>(existingContent.Select(line => line.Trim()));
+
             var newRules = rules.Split(["\r\n", "\r", "\n"], StringSplitOptions.RemoveEmptyEntries)
                                 .Select(rule => rule.Trim())
-                                .Where(rule => !string.IsNullOrWhiteSpace(rule));
+                                .Where(rule => !string.IsNullOrWhiteSpace(rule) && !existingRules.Contains(rule))
+                                .ToList();
 
-            existingContent.AddRange(newRules);
-            File.WriteAllLines(_ignoreFilePath, existingContent);
-
-            // Add the new patterns
-            foreach (var rule in newRules)
+            if (newRules.Count > 0)
             {
-                AddPattern(rule, Path.GetDirectoryName(_ignoreFilePath)!);
+                var updatedContent = existingContent.ToList();
+                updatedContent.AddRange(newRules);
+                await RetryFile.WriteAllLinesAsync(_ignoreFilePath, updatedContent);
+
+                foreach (var rule in newRules)
+                {
+                    AddPattern(rule, Path.GetDirectoryName(_ignoreFilePath)!);
+                }
             }
         }
         finally
         {
+            await Task.Delay(DebounceDelay + 200);
             _isInternalChange = false;
         }
     }
 
-    public void RemoveRules(string rules)
+    public async Task RemoveRulesAsync(string rules)
     {
         if (string.IsNullOrWhiteSpace(rules))
         {
             throw new ArgumentException("Rules cannot be empty or whitespace.", nameof(rules));
         }
 
-        _isInternalChange = true;
-        try
-        {
-            var content = File.ReadAllLines(_ignoreFilePath).ToList();
-            var rulesToRemove = rules.Split(["\r\n", "\r", "\n"], StringSplitOptions.RemoveEmptyEntries)
-                                     .Select(rule => rule.Trim())
-                                     .Where(rule => !string.IsNullOrWhiteSpace(rule))
-                                     .ToHashSet();
+        var content = File.ReadAllLines(_ignoreFilePath).ToList();
+        var rulesToRemove = rules.Split(["\r\n", "\r", "\n"], StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(rule => rule.Trim())
+                                 .Where(rule => !string.IsNullOrWhiteSpace(rule))
+                                 .ToHashSet();
 
-            content.RemoveAll(line => rulesToRemove.Contains(line.Trim()));
-            File.WriteAllLines(_ignoreFilePath, content);
-
-            // Reload all patterns
-            LoadPatterns();
-        }
-        finally
-        {
-            _isInternalChange = false;
-        }
+        content.RemoveAll(line => rulesToRemove.Contains(line.Trim()));
+        await RetryFile.WriteAllLinesAsync(_ignoreFilePath, content);
+        await Task.Delay(DebounceDelay + 100);
     }
 
     private void OnIgnoreFileChanged(object sender, FileSystemEventArgs e)
@@ -307,6 +303,21 @@ partial class IgnoreManager : IDisposable
     {
         _watcher.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    public static async Task<IgnoreManager> CreateAsync(string ignoreFilePath)
+    {
+        var manager = new IgnoreManager(ignoreFilePath);
+        await manager.InitializeAsync();
+        return manager;
+    }
+
+    public static IgnoreManager CreateNew(string ignoreFilePath)
+    {
+        var manager = new IgnoreManager(ignoreFilePath);
+        _ = manager.InitializeAsync();
+        Task.Delay(DebounceDelay).Wait();
+        return manager;
     }
 }
 

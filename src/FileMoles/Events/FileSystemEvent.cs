@@ -1,4 +1,5 @@
 ﻿using FileMoles.Diff;
+using FileMoles.Internal;
 using System.IO;
 namespace FileMoles.Events;
 
@@ -15,8 +16,8 @@ internal class FileSystemEvent
     public FileSystemEvent(WatcherChangeTypes changeType, string fullPath, string? oldFullPath = null)
     {
         ChangeType = changeType;
-        FullPath = fullPath;
-        OldFullPath = oldFullPath;
+        FullPath = IOHelper.NormalizePath(fullPath);
+        OldFullPath = oldFullPath == null ? null : IOHelper.NormalizePath(oldFullPath);
         IsDirectory = Directory.Exists(fullPath);
     }
 

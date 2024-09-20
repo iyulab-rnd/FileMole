@@ -1,4 +1,5 @@
 ﻿using FileMoles.Data;
+using FileMoles.Internal;
 using MimeKit.Cryptography;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,24 +16,35 @@ internal partial class TrackingDirectoryManager
 
     private TrackingDirectoryManager(string fullPath, DbContext unitOfWork)
     {
-        DirectoryPath = Path.GetFullPath(fullPath);  // 경로 정규화
+        DirectoryPath = IOHelper.NormalizePath(fullPath);  // 경로 정규화
         _hillFolderPath = Path.Combine(DirectoryPath, FileMoleGlobalOptions.HillName);
         _backupFolderPath = Path.Combine(_hillFolderPath, "backups");
         _dbContext = unitOfWork;
-        _ignoreManager = new TrackingIgnoreManager(Path.Combine(_hillFolderPath, FileMoleGlobalOptions.IgnoreFileName));
+        _ignoreManager = TrackingIgnoreManager.CreateNew(Path.Combine(DirectoryPath, FileMoleGlobalOptions.IgnoreFileName));
     }
 
     private async Task InitializeAsync()
     {
-        if (_ignoreManager.IsIgnored(DirectoryPath))
-        {
-            return; // 무시된 디렉토리면 초기화하지 않음
-        }
-
         await _dbContext.TrackingDirs.UpsertAsync(TrackingDir.CreateNew(DirectoryPath));
         CreateHillFolder();
+    }
 
-        await CleanupAsync();
+    private void CreateHillFolder()
+    {
+        IOHelper.CreateDirectory(_hillFolderPath);
+        IOHelper.CreateDirectory(_backupFolderPath);
+    }
+
+    private async Task ScanTrakingFilesAsync()
+    {
+        var files = Directory.GetFiles(DirectoryPath, "*", SearchOption.AllDirectories);
+        foreach (var file in files)
+        {
+            if (ShouldTrackingFile(file))
+            {
+                await TrackingFileAsync(file);
+            }
+        }
     }
 
     internal async Task UntrackingAsync()
@@ -40,47 +52,7 @@ internal partial class TrackingDirectoryManager
         await _dbContext.TrackingDirs.DeleteByPathAsync(DirectoryPath);
         await DeleteHillFolderAsync();
     }
-
-    private async Task CleanupAsync()
-    {
-        if (Directory.Exists(_backupFolderPath))
-        {
-            var files = Directory.GetFiles(_backupFolderPath);
-            if (files.Length == 0)
-            {
-                // 백업 폴더에 파일이 없으면 폴더를 삭제
-                Directory.Delete(_backupFolderPath);
-            }
-        }
-
-        if (Directory.Exists(_hillFolderPath))
-        {
-            var files = Directory.GetFiles(_hillFolderPath);
-            var directories = Directory.GetDirectories(_hillFolderPath);
-
-            // .hill 폴더 안에 백업 폴더와 다른 파일, 폴더가 없는 경우 삭제
-            if (files.Length == 0 && directories.Length == 0)
-            {
-                Directory.Delete(_hillFolderPath);
-            }
-        }
-
-        await Task.CompletedTask;
-    }
-
-    private void CreateHillFolder()
-    {
-        if (!Directory.Exists(_hillFolderPath))
-        {
-            Directory.CreateDirectory(_hillFolderPath);
-        }
-
-        if (!Directory.Exists(_backupFolderPath))
-        {
-            Directory.CreateDirectory(_backupFolderPath);
-        }
-    }
-
+    
     private async Task DeleteHillFolderAsync()
     {
         if (Directory.Exists(_hillFolderPath))
@@ -109,26 +81,54 @@ internal partial class TrackingDirectoryManager
         return Path.Combine(_backupFolderPath, $"{relativePathHash}.bak");
     }
 
-    public Task BackupFileAsync(string filePath)
+    private async Task BackupFileAsync(string filePath)
     {
-        return Task.Run(() =>
+        var backupPath = GetBackupFilePath(filePath);
+        var backupDir = Path.GetDirectoryName(backupPath)!;
+
+        if (!Directory.Exists(backupDir))
         {
-            var backupPath = GetBackupFilePath(filePath);
-            var backupDir = Path.GetDirectoryName(backupPath)!;
+            Directory.CreateDirectory(backupDir);
+        }
 
-            if (!Directory.Exists(backupDir))
-            {
-                Directory.CreateDirectory(backupDir);
-            }
-
-            File.Copy(filePath, backupPath, true); // 파일 덮어쓰기
-        });
+        await RetryFile.CopyAsync(filePath, backupPath);
     }
 
     public bool HasBackup(string filePath)
     {
         var backupPath = GetBackupFilePath(filePath);
         return File.Exists(backupPath);
+    }
+
+    internal bool ShouldTrackingFile(string filePath)
+    {
+        var relativePath = Path.GetRelativePath(DirectoryPath, filePath);
+        return !_ignoreManager.IsIgnored(relativePath);
+    }
+
+    internal bool IsTrackingFile(string filePath) => ShouldTrackingFile(filePath);
+
+    internal async Task TrackingFileAsync(string filePath)
+    {
+        if (IsIgnored(filePath))
+        {
+            await _ignoreManager.IncludeFilePathAsync(filePath);
+        }
+
+        await BackupFileAsync(filePath);
+    }
+
+    internal async Task UntrackingFileAsync(string filePath)
+    {
+        await _ignoreManager.ExcludeFilePathAsync(filePath);
+
+        var backupPath = GetBackupFilePath(filePath);
+        if (File.Exists(backupPath))
+        {
+            await RetryFile.DeleteAsync(backupPath);
+        }
+
+        await Task.CompletedTask;
     }
 }
 
@@ -140,7 +140,6 @@ internal partial class TrackingDirectoryManager
         {
             var manager = new TrackingDirectoryManager(dirPath, unitOfWork);
             await manager.InitializeAsync();
-            manager._ignoreManager.IncludeTextFormat();
             return manager;
         }
         else
@@ -154,8 +153,7 @@ internal partial class TrackingDirectoryManager
             var directory = Path.GetDirectoryName(filePath)!;
             var manager = new TrackingDirectoryManager(directory, unitOfWork);
             await manager.InitializeAsync();
-            manager._ignoreManager.IncludeFilePath(filePath);
-            await manager.BackupFileAsync(filePath);
+            await manager.TrackingFileAsync(filePath);
             return manager;
         }
         else
@@ -164,7 +162,7 @@ internal partial class TrackingDirectoryManager
 
     public static bool HasHill(string directoryPath)
     {
-        var hillFolderPath = Path.Combine(Path.GetFullPath(directoryPath), FileMoleGlobalOptions.HillName);
+        var hillFolderPath = Path.Combine(directoryPath, FileMoleGlobalOptions.HillName);
         return Directory.Exists(hillFolderPath);
     }
 }

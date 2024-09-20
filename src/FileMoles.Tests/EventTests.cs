@@ -3,12 +3,8 @@
 namespace FileMoles.Tests;
 
 [Collection("FileMole Tests")]
-public class EventTests : TestBase
+public class EventTests(ITestOutputHelper output) : TestBase(output)
 {
-    public EventTests(ITestOutputHelper output) : base(output)
-    {
-    }
-
     [Fact]
     public async Task FileCreated_ShouldTriggerEvent()
     {
@@ -41,7 +37,7 @@ public class EventTests : TestBase
         await WaitForEventProcessingAsync();
 
         output.WriteLine("Modifying file content...");
-        await SafeFileIO.AppendAllTextAsync(filePath, "Modified content");
+        await RetryFile.AppendAllTextAsync(filePath, "Modified content");
         output.WriteLine($"File modified: {filePath}");
 
         for (int i = 0; i < 20; i++)
@@ -75,7 +71,7 @@ public class EventTests : TestBase
             eventTriggered = true;
         };
 
-        await SafeFileIO.DeleteAsync(filePath);
+        await RetryFile.DeleteAsync(filePath);
 
         await WaitForEventProcessingAsync();
 
@@ -96,7 +92,7 @@ public class EventTests : TestBase
             Assert.Equal(newPath, args.FullPath);
         };
 
-        await SafeFileIO.MoveAsync(originalPath, newPath);
+        await RetryFile.MoveAsync(originalPath, newPath);
 
         await WaitForEventProcessingAsync();
 
@@ -118,14 +114,14 @@ public class EventTests : TestBase
 
         Assert.Equal(0, changeEventCount);
 
-        await SafeFileIO.WriteAllTextAsync(filePath, "Modified content");
+        await RetryFile.WriteAllTextAsync(filePath, "Modified content");
 
         await WaitForEventProcessingAsync();
 
         Assert.Equal(1, changeEventCount);
     }
 
-    private async Task WaitForEventProcessingAsync()
+    private static async Task WaitForEventProcessingAsync()
     {
         await Task.Delay(2000);  // Increased delay to allow for potential retries
     }

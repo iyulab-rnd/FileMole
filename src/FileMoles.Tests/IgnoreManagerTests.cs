@@ -49,7 +49,7 @@ public class IgnoreManagerTests : IDisposable
 ");
 
         // IgnoreManager 인스턴스 생성
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // 파일이 올바르게 무시되거나 포함되는지 테스트
         Assert.False(ignoreManager.IsIgnored(file1), "file1.txt는 포함되어야 합니다.");
@@ -85,7 +85,7 @@ public class IgnoreManagerTests : IDisposable
 ");
 
         // IgnoreManager 인스턴스 생성
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // 파일이 올바르게 무시되거나 포함되는지 테스트
         Assert.True(ignoreManager.IsIgnored(Path.Combine(testPath, "somefile.txt")), "상위 디렉토리의 파일은 무시되어야 합니다.");
@@ -100,7 +100,7 @@ public class IgnoreManagerTests : IDisposable
         File.Delete(ignoreFilePath);
 
         // IgnoreManager 인스턴스 생성 (파일이 없으므로 생성되어야 함)
-        _ = new IgnoreManager(ignoreFilePath);
+        _ = IgnoreManager.CreateNew(ignoreFilePath);
 
         // .ignore 파일이 생성되었는지 확인
         Assert.True(File.Exists(ignoreFilePath), ".ignore 파일이 생성되어야 합니다.");
@@ -116,7 +116,7 @@ public class IgnoreManagerTests : IDisposable
         var file = Path.Combine(testPath, "file.txt");
         File.WriteAllText(file, "Test file");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // The file should not be ignored
         Assert.False(ignoreManager.IsIgnored(file), "file.txt should not be ignored when .ignore file is empty.");
@@ -135,7 +135,7 @@ public class IgnoreManagerTests : IDisposable
         var file = Path.Combine(testPath, "file.txt");
         File.WriteAllText(file, "Test file");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // The file should not be ignored
         Assert.False(ignoreManager.IsIgnored(file), "file.txt should not be ignored when .ignore file contains only comments.");
@@ -172,7 +172,7 @@ build/**
         File.WriteAllText(buildFile1, "Build file");
         File.WriteAllText(buildFile2, "File to keep");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(logFile), "app.log should be ignored.");
@@ -202,7 +202,7 @@ special file.txt
         File.WriteAllText(unicodeFile, "Unicode file");
         File.WriteAllText(normalFile, "Normal file");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(fileWithSpace), "File with spaces should be ignored.");
@@ -211,7 +211,7 @@ special file.txt
     }
 
     [Fact]
-    public void IgnoreManager_ShouldHandleNegationPatternsCorrectly()
+    public async Task IgnoreManager_ShouldHandleNegationPatternsCorrectly()
     {
         // Create a .ignore file
         File.WriteAllText(ignoreFilePath, @"
@@ -231,7 +231,7 @@ special file.txt
         File.WriteAllText(file2, "Important file");
         File.WriteAllText(file3, "Log file");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = await IgnoreManager.CreateAsync(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(file1), "note.txt should be ignored.");
@@ -260,7 +260,7 @@ logs/**
         File.WriteAllText(logFile1, "Error log");
         File.WriteAllText(logFile2, "Important log");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(logFile1), "logs/error.log should be ignored.");
@@ -297,7 +297,7 @@ src/main/test/**
         File.WriteAllText(file2, "Application code");
         File.WriteAllText(file3, "Test code");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(file1), "src/util.cs should be ignored.");
@@ -317,7 +317,7 @@ src/main/test/**
         var file = Path.Combine(testPath, "file.txt");
         File.WriteAllText(file, "Test file");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // The file should not be ignored despite the invalid pattern
         Assert.False(ignoreManager.IsIgnored(file), "file.txt should not be ignored even if .ignore contains invalid patterns.");
@@ -347,7 +347,7 @@ src/main/test/**
         File.WriteAllText(file2, "Readme file");
         File.WriteAllText(file3, "Notes");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(file1), "script should be ignored.");
@@ -379,7 +379,7 @@ secret.txt
         File.WriteAllText(file2, "Secret");
         File.WriteAllText(file3, "Image");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.False(ignoreManager.IsIgnored(file1), "document.txt should be included.");
@@ -405,7 +405,7 @@ secret.txt
         File.WriteAllText(logFile, "Error log");
         File.WriteAllText(logDirFile, "Latest log");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(logFile), "error.log should be ignored.");
@@ -429,7 +429,7 @@ bin/
 
         File.WriteAllText(binFile, "Executable");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(binDir), "bin directory should be ignored.");
@@ -457,7 +457,7 @@ bin/
         File.WriteAllText(binFile1, "Executable");
         File.WriteAllText(binFile2, "Include me");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.True(ignoreManager.IsIgnored(binDir), "bin directory should be ignored.");
@@ -486,7 +486,7 @@ bin/
         File.WriteAllText(srcFile, "Source code");
         File.WriteAllText(rootFile, "Root readme");
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
 
         // Test files are correctly ignored or included
         Assert.False(ignoreManager.IsIgnored(srcDir), "src directory should be included.");
@@ -495,12 +495,12 @@ bin/
     }
 
     [Fact]
-    public void AddRule_ShouldAddNewRuleToIgnoreFile()
+    public async Task AddRule_ShouldAddNewRuleToIgnoreFile()
     {
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
         var newRule = "*.log";
 
-        ignoreManager.AddRules(newRule);
+        await ignoreManager.AddRulesAsync(newRule);
 
         var rules = ignoreManager.GetRules().ToList();
         Assert.Contains(newRule, rules);
@@ -511,28 +511,28 @@ bin/
     }
 
     [Fact]
-    public void AddRule_ShouldImmediatelyApplyNewRule()
+    public async Task AddRule_ShouldImmediatelyApplyNewRule()
     {
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
         var newRule = "*.log";
         var testFile = Path.Combine(testPath, "test.log");
         File.WriteAllText(testFile, "Test log file");
 
         Assert.False(ignoreManager.IsIgnored(testFile));
 
-        ignoreManager.AddRules(newRule);
+        await ignoreManager.AddRulesAsync(newRule);
 
         Assert.True(ignoreManager.IsIgnored(testFile));
     }
 
     [Fact]
-    public void RemoveRule_ShouldRemoveExistingRuleFromIgnoreFile()
+    public async Task RemoveRule_ShouldRemoveExistingRuleFromIgnoreFile()
     {
         var initialRules = new[] { "*.txt", "*.log" };
         File.WriteAllLines(ignoreFilePath, initialRules);
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
-        ignoreManager.RemoveRules("*.log");
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
+        await ignoreManager.RemoveRulesAsync("*.log");
 
         var rules = ignoreManager.GetRules().ToList();
         Assert.DoesNotContain("*.log", rules);
@@ -545,18 +545,18 @@ bin/
     }
 
     [Fact]
-    public void RemoveRule_ShouldImmediatelyApplyRuleRemoval()
+    public async Task RemoveRule_ShouldImmediatelyApplyRuleRemoval()
     {
         var initialRules = new[] { "*.txt", "*.log" };
         File.WriteAllLines(ignoreFilePath, initialRules);
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
         var testFile = Path.Combine(testPath, "test.log");
         File.WriteAllText(testFile, "Test log file");
 
         Assert.True(ignoreManager.IsIgnored(testFile));
 
-        ignoreManager.RemoveRules("*.log");
+        await ignoreManager.RemoveRulesAsync("*.log");
 
         Assert.False(ignoreManager.IsIgnored(testFile));
     }
@@ -575,7 +575,7 @@ bin/
         };
         File.WriteAllLines(ignoreFilePath, rules);
 
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
         var retrievedRules = ignoreManager.GetRules().ToList();
 
         Assert.Equal(3, retrievedRules.Count);
@@ -588,28 +588,28 @@ bin/
     }
 
     [Fact]
-    public void AddRule_ShouldThrowExceptionForEmptyRule()
+    public async Task AddRule_ShouldThrowExceptionForEmptyRule()
     {
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
-        Assert.Throws<ArgumentException>(() => ignoreManager.AddRules(""));
-        Assert.Throws<ArgumentException>(() => ignoreManager.AddRules("  "));
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
+        await Assert.ThrowsAsync<ArgumentException>(() => ignoreManager.AddRulesAsync(""));
+        await Assert.ThrowsAsync<ArgumentException>(() => ignoreManager.AddRulesAsync("  "));
     }
 
     [Fact]
-    public void RemoveRule_ShouldThrowExceptionForEmptyRule()
+    public async Task RemoveRule_ShouldThrowExceptionForEmptyRule()
     {
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
-        Assert.Throws<ArgumentException>(() => ignoreManager.RemoveRules(""));
-        Assert.Throws<ArgumentException>(() => ignoreManager.RemoveRules("  "));
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
+        await Assert.ThrowsAsync<ArgumentException>(() => ignoreManager.RemoveRulesAsync(""));
+        await Assert.ThrowsAsync<ArgumentException>(() => ignoreManager.RemoveRulesAsync("  "));
     }
 
     [Fact]
-    public void RemoveRule_ShouldNotThrowExceptionForNonExistentRule()
+    public async Task RemoveRule_ShouldNotThrowExceptionForNonExistentRule()
     {
-        var ignoreManager = new IgnoreManager(ignoreFilePath);
+        var ignoreManager = IgnoreManager.CreateNew(ignoreFilePath);
         var initialRules = ignoreManager.GetRules().ToList();
 
-        ignoreManager.RemoveRules("non_existent_rule");
+        await ignoreManager.RemoveRulesAsync("non_existent_rule");
 
         var finalRules = ignoreManager.GetRules().ToList();
         Assert.Equal(initialRules, finalRules);

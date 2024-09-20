@@ -1,21 +1,16 @@
 ﻿using FileMoles.Data;
 using Microsoft.Data.Sqlite;
 
-internal class TrackingDirRepository : IRepository<TrackingDir>
+internal class TrackingDirRepository(DbContext unitOfWork) : IRepository<TrackingDir>
 {
-    private readonly DbContext _unitOfWork;
+    private readonly DbContext _unitOfWork = unitOfWork;
 
     public static readonly string CreateTableSql = @"
         CREATE TABLE IF NOT EXISTS TrackingDir (
             Path TEXT PRIMARY KEY
         );";
 
-    public TrackingDirRepository(DbContext unitOfWork)
-    {
-        _unitOfWork = unitOfWork;
-    }
-
-    private TrackingDir BuildTrackingDir(SqliteDataReader reader)
+    private static TrackingDir BuildTrackingDir(SqliteDataReader reader)
     {
         return new TrackingDir()
         {

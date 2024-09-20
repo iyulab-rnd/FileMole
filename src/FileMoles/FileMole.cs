@@ -6,6 +6,8 @@ using FileMoles.Interfaces;
 using FileMoles.Tracking;
 using System.Diagnostics;
 using FileMoles.Monitoring;
+using System.Runtime.CompilerServices;
+using NPOI.SS.Formula.Eval;
 
 namespace FileMoles;
 
@@ -99,6 +101,8 @@ public class FileMole : IDisposable
         {
             var sw = Stopwatch.StartNew();
 
+            _ = _trackingManager.InitializeAsync();
+
             await _initialScanner.ScanAsync(_options.Moles.Select(m => m.Path), cancellationToken);
 
             sw.Stop();
@@ -109,9 +113,30 @@ public class FileMole : IDisposable
         }, cancellationToken);
     }
 
-    private static void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
+    private async void HandleDirectoryEvent(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
     {
         raiseEvent(e);
+        if (e.FullPath.EndsWith(FileMoleGlobalOptions.HillName))
+        {
+            if (e.ChangeType == WatcherChangeTypes.Created)
+            {
+                var baseDir = Path.GetDirectoryName(e.FullPath)!;
+                var r = this.IsTracking(baseDir);
+                if (r == false)
+                {
+                    await this.TrackingAsync(baseDir);
+                }
+            }
+            else if (e.ChangeType == WatcherChangeTypes.Deleted)
+            {
+                var baseDir = Path.GetDirectoryName(e.FullPath)!;
+                var r = this.IsTracking(baseDir);
+                if (r == true)
+                {
+                    await this.UntrackingAsync(baseDir);
+                }
+            }
+        }
     }
 
     private async Task HandleFileEventAsync(FileSystemEvent e, Action<FileSystemEvent> raiseEvent)
@@ -224,9 +249,9 @@ public class FileMole : IDisposable
         }
     }
 
-    public IAsyncEnumerable<FileInfo> SearchFilesAsync(string searchTerm)
+    public IAsyncEnumerable<FileInfo> SearchFilesAsync(string search)
     {
-        return _fileIndexer.SearchAsync(searchTerm);
+        return _fileIndexer.SearchAsync(search);
     }
 
     public async Task AddMoleAsync(string path, MoleType type = MoleType.Local, string provider = "Default")
@@ -322,6 +347,11 @@ public class FileMole : IDisposable
     public Task UntrackingAsync(string directory)
     {
         return _trackingManager.UntrackingAsync(directory);
+    }
+
+    public bool IsTracking(string filePath)
+    {
+        return _trackingManager.IsTracking(filePath);
     }
 
     protected virtual void Dispose(bool disposing)
