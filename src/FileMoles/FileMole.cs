@@ -335,9 +335,9 @@ public class FileMole : IDisposable
         return provider!.DeleteAsync(fullPath);
     }
 
-    public Task TrackingAsync(string filePath) => _trackingManager.TrackingAsync(filePath);
+    public Task<bool> TrackingAsync(string filePath) => _trackingManager.TrackingAsync(filePath);
     
-    public Task UntrackingAsync(string filePath) => _trackingManager.UntrackingAsync(filePath);
+    public Task<bool> UntrackingAsync(string filePath) => _trackingManager.UntrackingAsync(filePath);
 
     public Task<bool> IsTrackingAsync(string filePath) => _trackingManager.IsTrackingAsync(filePath);
 

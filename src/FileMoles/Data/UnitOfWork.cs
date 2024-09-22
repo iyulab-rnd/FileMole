@@ -40,6 +40,7 @@ internal class UnitOfWork : IDisposable
             using var command = connection.CreateCommand();
             command.CommandText = $@"
                 {FileIndexRepository.CreateTableSql}
+                {TrackingDirRepository.CreateTableSql}
                 {TrackingFileRepository.CreateTableSql}";
             await command.ExecuteNonQueryAsync();
         });

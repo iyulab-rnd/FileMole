@@ -49,6 +49,8 @@ public class TrackingManager : IDisposable
                         {
                             var args = e.CreateFileContentChangedEventArgs(diff);
                             FileContentChanged.Invoke(this, args);
+
+                            await manager.BackupTryAsync(e.FullPath);
                         }
                     }
                 }
@@ -65,7 +67,7 @@ public class TrackingManager : IDisposable
 
     public Task<bool> IsTrackingAsync(string filePath) => manager.IsTrackingAsync(filePath);
 
-    public Task TrackingAsync(string filePath) => manager.TrackingAsync(filePath);
+    public Task<bool> TrackingAsync(string filePath) => manager.TrackingAsync(filePath);
 
-    public Task UntrackingAsync(string filePath) => manager.UntrackingAsync(filePath);
+    public Task<bool> UntrackingAsync(string filePath) => manager.UntrackingAsync(filePath);
 }

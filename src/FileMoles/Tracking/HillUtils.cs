@@ -7,9 +7,10 @@ namespace FileMoles.Tracking;
 
 public static class HillUtils
 {
-    private static readonly string hillName = FileMoleGlobalOptions.HillName; // .hill
+    // FileMoleGlobalOptions.HillName // .hill
     private static readonly string backupName = "backups"; // .hill/backups
     private static readonly TimeSpan allowedTimeDifference = TimeSpan.FromSeconds(1); // Allow 1 second difference
+
 
     public static async Task BackupAsync(string filePath)
     {
@@ -70,10 +71,11 @@ public static class HillUtils
 
     private static async Task<string> GetBackupFilePath(string filePath)
     {
-        string hillFolder = FindOrCreateHillFolder(filePath);
+        var dir = Path.GetDirectoryName(filePath)!;
+        string hillFolder = FindOrCreateHillFolder(dir);
         string backupFolder = GetBackupFolder(hillFolder);
 
-        string relativeFilePath = Path.GetRelativePath(hillFolder, filePath);
+        string relativeFilePath = Path.GetRelativePath(dir, filePath);
         string fileHash = await CalculateRelativePathHashAsync(relativeFilePath);
         var backupFileName = $"{fileHash}.bak";
         string backupFilePath = Path.Combine(backupFolder, backupFileName);
@@ -85,7 +87,7 @@ public static class HillUtils
         string originalPath = path;
         while (!string.IsNullOrEmpty(path))
         {
-            string hillPath = Path.Combine(path, hillName);
+            string hillPath = Path.Combine(path, FileMoleGlobalOptions.HillName);
             if (Directory.Exists(hillPath))
             {
                 return hillPath;
@@ -98,10 +100,8 @@ public static class HillUtils
             path = parentPath;
         }
 
-        // If we're here, we didn't find a .hill folder, so create one in the original path
-        string newHillPath = Path.Combine(Path.GetDirectoryName(originalPath) ?? "", hillName);
-        IOHelper.CreateDirectory(newHillPath);
-        return newHillPath;
+        // Hill folder not found, create one
+        return EnsureHillFolder(originalPath);
     }
 
     private static string GetBackupFolder(string hillFolder)
@@ -223,5 +223,47 @@ public static class HillUtils
                 }
             }
         }
+    }
+
+    public static string EnsureHillFolder(string path)
+    {
+        var hillPath = Path.Combine(path, FileMoleGlobalOptions.HillName);
+        if (!Directory.Exists(hillPath))
+        {
+            try
+            {
+                IOHelper.CreateDirectory(hillPath);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to create .hill folder at {hillPath}: {ex.Message}");
+            }
+        }
+        return hillPath;
+    }
+
+    internal static async Task CleanupHillFolderAsync(string path)
+    {
+        var hillPath = Path.Combine(path, FileMoleGlobalOptions.HillName);
+        if (!Directory.Exists(hillPath))
+        {
+            return;
+        }
+        
+        // 백업폴더가 없거나 백업파일이 하나도 없다면 hill 폴더를 삭제
+        var backupDir = Path.Combine(hillPath, backupName);
+        if (!Directory.Exists(backupDir) || !Directory.EnumerateFiles(backupDir).Any())
+        {
+            try
+            {
+                Directory.Delete(hillPath, true);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to delete .hill folder at {hillPath}: {ex.Message}");
+            }
+        }
+
+        await Task.CompletedTask;
     }
 }

@@ -11,6 +11,7 @@ internal class FileIndexer(DbContext dbContext) : IDisposable
 {
     private readonly DbContext _dbContext = dbContext;
     private bool _disposed;
+    private readonly FileIndexIgnoreManager ignoreManager = new();
 
     private async Task<bool> IndexFileAsync(FileInfo file, CancellationToken cancellationToken = default)
     {
@@ -145,12 +146,13 @@ internal class FileIndexer(DbContext dbContext) : IDisposable
         }
     }
 
-    internal static bool ShouldIgnore(FileInfo fileInfo)
+    internal bool ShouldIgnore(FileInfo fileInfo)
     {
         return fileInfo.Attributes.HasFlag(FileAttributes.Directory)
             || fileInfo.Attributes.HasFlag(FileAttributes.Hidden)
             || fileInfo.Name.StartsWith('.')
-            || IOHelper.IsHidden(fileInfo.FullName);
+            || IOHelper.IsHidden(fileInfo.FullName)
+            || ignoreManager.ShouldIgnore(fileInfo.FullName);
     }
 
     public void Dispose()

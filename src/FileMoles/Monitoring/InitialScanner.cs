@@ -52,7 +52,7 @@ internal class InitialScanner(DbContext dbContext, FileIndexer fileIndexer, Dict
             // 현재 디렉터리의 파일 및 서브디렉터리 목록을 가져옵니다.
             await foreach (var file in storageProvider.GetFilesAsync(path))
             {
-                if (FileIndexer.ShouldIgnore(file)) continue;
+                if (_fileIndexer.ShouldIgnore(file)) continue;
 
                 filesOnDisk.Add(file);
             }
