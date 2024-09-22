@@ -1,17 +1,11 @@
 ﻿using FileMoles.Diff;
 using System.Security.Cryptography;
-using System.IO;
 using System.Text;
-using MimeKit.Cryptography;
+using FileMoles.Internal;
 
 namespace FileMoles.Tracking;
 
-#if DEBUG
-public
-#else
-internal 
-#endif 
-static class HillUtils
+public static class HillUtils
 {
     private static readonly string hillName = FileMoleGlobalOptions.HillName; // .hill
     private static readonly string backupName = "backups"; // .hill/backups
@@ -106,7 +100,7 @@ static class HillUtils
 
         // If we're here, we didn't find a .hill folder, so create one in the original path
         string newHillPath = Path.Combine(Path.GetDirectoryName(originalPath) ?? "", hillName);
-        Directory.CreateDirectory(newHillPath);
+        IOHelper.CreateDirectory(newHillPath);
         return newHillPath;
     }
 

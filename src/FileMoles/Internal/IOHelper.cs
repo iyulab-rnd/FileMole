@@ -109,42 +109,14 @@ internal static class IOHelper
 
     public static string NormalizePath(string path)
     {
-        if (string.IsNullOrEmpty(path))
-            return path;
+        var normalizedPath = Path.GetFullPath(path);
 
-        // Step 1: Convert to absolute path
-        path = Path.GetFullPath(path);
-
-        // Step 2: Normalize directory separators
-        path = path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
-
-        // Step 3: Remove trailing separators
-        path = path.TrimEnd(Path.DirectorySeparatorChar);
-
-        // Step 4: Normalize case (only for Windows)
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        if (Path.DirectorySeparatorChar == '\\' && normalizedPath.Length >= 2 && normalizedPath[1] == ':')
         {
-            path = path.ToLowerInvariant();
+            // Windows 시스템인 경우 드라이브 문자 대문자로 변경
+            return char.ToUpper(normalizedPath[0]) + normalizedPath[1..];
         }
 
-        // Step 5: Handle root paths
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            // For Windows, ensure drive letter is uppercase
-            if (path.Length >= 2 && path[1] == ':')
-            {
-                path = char.ToLowerInvariant(path[0]) + path[1..];
-            }
-        }
-        else
-        {
-            // For Unix-like systems, ensure it starts with '/'
-            if (!path.StartsWith('/'))
-            {
-                path = "/" + path;
-            }
-        }
-
-        return path;
+        return normalizedPath;
     }
 }

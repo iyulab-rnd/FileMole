@@ -7,7 +7,8 @@ namespace FileMoles.Tracking;
 internal class InternalTrackingManager : IDisposable
 {
     private readonly DbContext _dbContext;
-    private readonly ConcurrentDictionary<string, bool> _trackingCache = new();
+    private readonly ConcurrentDictionary<string, bool> _trackingDirsCache = new();
+    private readonly ConcurrentDictionary<string, bool> _trackingFilesCache = new();
     private bool _isCacheRefreshed = false;
 
     public InternalTrackingManager(DbContext dbContext)
@@ -20,9 +21,21 @@ internal class InternalTrackingManager : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    internal async Task<bool> IsTrackingAsync(string filePath)
+    internal Task<bool> IsTrackingAsync(string path)
     {
-        if (_trackingCache.TryGetValue(filePath, out bool isTracking))
+        if (Directory.Exists(path))
+        {
+            return IsTrackingDirAsync(path);
+        }
+        else
+        {
+            return IsTrackingFileAsync(path);
+        }
+    }
+
+    private async Task<bool> IsTrackingDirAsync(string path)
+    {
+        if (_trackingDirsCache.TryGetValue(path, out bool isTracking))
         {
             return isTracking;
         }
@@ -33,28 +46,70 @@ internal class InternalTrackingManager : IDisposable
         }
         else
         {
-            return await IsTrackingFromDbAsync(filePath);
+            return await IsTrackingDirFromDbAsync(path);
         }
     }
 
-    private async Task<bool> IsTrackingFromDbAsync(string filePath)
+    private async Task<bool> IsTrackingFileAsync(string filePath)
     {
-        bool isTracking = await _dbContext.TrackingFiles.IsTrackingFileAsync(filePath);
+        if (_trackingFilesCache.TryGetValue(filePath, out bool isTracking))
+        {
+            return isTracking;
+        }
+
+        if (_isCacheRefreshed)
+        {
+            return false;
+        }
+        else
+        {
+            return await IsTrackingFileFromDbAsync(filePath);
+        }
+    }
+
+    private async Task<bool> IsTrackingDirFromDbAsync(string filePath)
+    {
+        bool isTracking = await _dbContext.TrackingDirs.IsTrackingDirAsync(filePath);
         if (isTracking)
         {
-            _trackingCache[filePath] = true;
+            _trackingDirsCache[filePath] = true;
         }
         return isTracking;
     }
 
-    internal Task TrackingAsync(string filePath)
+    private async Task<bool> IsTrackingFileFromDbAsync(string filePath)
+    {
+        bool isTracking = await _dbContext.TrackingFiles.IsTrackingFileAsync(filePath);
+        if (isTracking)
+        {
+            _trackingFilesCache[filePath] = true;
+        }
+        return isTracking;
+    }
+
+    internal Task TrackingAsync(string path)
+    {
+        return Directory.Exists(path) 
+            ? TrackingDirAsync(path) 
+            : TrackingFileAsync(path);
+    }
+
+    private async Task TrackingDirAsync(string path)
+    {
+        _trackingDirsCache[path] = true;
+
+        var trackingDir = TrackingDir.CreateNew(path);
+        await _dbContext.TrackingDirs.UpsertAsync(trackingDir);
+    }
+
+    private Task TrackingFileAsync(string filePath)
     {
         if (File.Exists(filePath) != true)
         {
             throw new FileNotFoundException("File not found", filePath);
         }
 
-        _trackingCache[filePath] = true;
+        _trackingFilesCache[filePath] = true;
         _ = Task.Run(async () =>
         {
             var trackingFile = TrackingFile.CreateNew(filePath);
@@ -64,13 +119,26 @@ internal class InternalTrackingManager : IDisposable
         return Task.CompletedTask;
     }
 
-    internal Task UntrackingAsync(string filePath)
+    internal Task UntrackingAsync(string path)
     {
-        _trackingCache.TryRemove(filePath, out _);
+        return Directory.Exists(path)
+            ? UntrackingDirAsync(path)
+            : UntrackingFileAsync(path);
+    }
+
+    private async Task UntrackingDirAsync(string path)
+    {
+        _trackingDirsCache.TryRemove(path, out _);
+        await _dbContext.TrackingFiles.DeleteAsync(path);
+    }
+
+    private Task UntrackingFileAsync(string filePath)
+    {
+        _trackingFilesCache.TryRemove(filePath, out _);
         _ = Task.Run(async () =>
         {
             await _dbContext.TrackingFiles.DeleteAsync(filePath);
-            await CleanupAsync(filePath);
+            await CleanupTrackingFileAsync(filePath);
         });
         return Task.CompletedTask;
     }
@@ -79,14 +147,40 @@ internal class InternalTrackingManager : IDisposable
     {
         _isCacheRefreshed = false;
 
-        _trackingCache.Clear(); // Clear the cache before refreshing
+        await RefreshTrackingDirsAsync();
+        await RefreshTrackingFilesAsync();
+
+        _isCacheRefreshed = true;
+    }
+
+    private async Task RefreshTrackingDirsAsync()
+    {
+        _trackingDirsCache.Clear();
+        var trackingDirs = await _dbContext.TrackingDirs.FindAllAsync();
+
+        foreach (var trackingDir in trackingDirs)
+        {
+            if (Directory.Exists(trackingDir.Path))
+            {
+                _trackingDirsCache[trackingDir.Path] = true;
+            }
+            else
+            {
+                _ = UntrackingDirAsync(trackingDir.Path);
+            }
+        }
+    }
+
+    private async Task RefreshTrackingFilesAsync()
+    {
+        _trackingFilesCache.Clear();
         var trackingFiles = await _dbContext.TrackingFiles.FindAllAsync();
 
         foreach (var trackingFile in trackingFiles)
         {
             if (File.Exists(trackingFile.FullPath))
             {
-                _trackingCache[trackingFile.FullPath] = true;
+                _trackingFilesCache[trackingFile.FullPath] = true;
                 _ = BackupTryAsync(trackingFile.FullPath);
             }
             else
@@ -94,8 +188,6 @@ internal class InternalTrackingManager : IDisposable
                 _ = UntrackingAsync(trackingFile.FullPath);
             }
         }
-
-        _isCacheRefreshed = true;
     }
 
     internal static Task<bool> IsChangedAsync(string fullPath)
@@ -112,7 +204,7 @@ internal class InternalTrackingManager : IDisposable
         }
     }
 
-    private static Task CleanupAsync(string filePath)
+    private static Task CleanupTrackingFileAsync(string filePath)
     {
         return HillUtils.DeleteBackupAsync(filePath);
     }
