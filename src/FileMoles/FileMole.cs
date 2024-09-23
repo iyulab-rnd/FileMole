@@ -6,6 +6,7 @@ using FileMoles.Interfaces;
 using FileMoles.Tracking;
 using System.Diagnostics;
 using FileMoles.Monitoring;
+using System.Runtime.CompilerServices;
 
 namespace FileMoles;
 
@@ -91,6 +92,8 @@ public class FileMole : IDisposable
 
     private async Task InitializeAsync(CancellationToken cancellationToken)
     {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+
         await dbContext.OptimizeAsync(cancellationToken);
 
         // 비동기적으로 실행
@@ -245,9 +248,9 @@ public class FileMole : IDisposable
         }
     }
 
-    public IAsyncEnumerable<FileInfo> SearchFilesAsync(string search)
+    public IAsyncEnumerable<FileInfo> SearchFilesAsync(string search, CancellationToken cancellationToken = default)
     {
-        return _fileIndexer.SearchAsync(search);
+        return _fileIndexer.SearchAsync(search, cancellationToken);
     }
 
     public async Task AddMoleAsync(string path, MoleType type = MoleType.Local, string provider = "Default")

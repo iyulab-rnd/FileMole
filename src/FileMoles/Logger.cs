@@ -1,6 +1,6 @@
 ﻿namespace FileMoles;
 
-public class Logger
+internal class Logger
 {
     internal static void Debug(string message, params object?[] args)
     {
