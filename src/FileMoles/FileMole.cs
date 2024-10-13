@@ -6,7 +6,6 @@ using FileMoles.Interfaces;
 using FileMoles.Tracking;
 using System.Diagnostics;
 using FileMoles.Monitoring;
-using System.Runtime.CompilerServices;
 
 namespace FileMoles;
 
@@ -92,7 +91,7 @@ public class FileMole : IDisposable
 
     private async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        await Task.Delay(TimeSpan.FromSeconds(3));
+        await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
 
         await dbContext.OptimizeAsync(cancellationToken);
 
