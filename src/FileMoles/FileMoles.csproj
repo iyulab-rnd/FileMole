@@ -21,4 +21,8 @@
     <Folder Include="Services\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Raggle\src\Raggle.Helpers.HuggingFace\Raggle.Helpers.HuggingFace.csproj" />
+  </ItemGroup>
+
 </Project>
