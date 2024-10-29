@@ -106,17 +106,4 @@ internal static class IOHelper
             }
         }
     }
-
-    public static string NormalizePath(string path)
-    {
-        var normalizedPath = Path.GetFullPath(path);
-
-        if (Path.DirectorySeparatorChar == '\\' && normalizedPath.Length >= 2 && normalizedPath[1] == ':')
-        {
-            // Windows 시스템인 경우 드라이브 문자 대문자로 변경
-            return char.ToUpper(normalizedPath[0]) + normalizedPath[1..];
-        }
-
-        return normalizedPath;
-    }
 }
