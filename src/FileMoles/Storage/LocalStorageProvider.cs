@@ -233,9 +233,9 @@ internal class LocalStorageProvider : IStorageProvider
 
                 return new ValueTask<bool>(_enumerator.MoveNext());
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                Logger.Error($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
+                // Logger.Error($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
             }
             catch (SecurityException ex)
             {
@@ -281,9 +281,9 @@ internal class LocalStorageProvider : IStorageProvider
 
                 return new ValueTask<bool>(_enumerator.MoveNext());
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                Logger.Error($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
+                // Logger.Error($"Access denied to directory: {_directoryInfo.FullName}. Error: {ex.Message}");
             }
             catch (SecurityException ex)
             {
