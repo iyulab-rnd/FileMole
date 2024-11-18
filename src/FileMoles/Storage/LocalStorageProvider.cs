@@ -45,7 +45,7 @@ internal class LocalStorageProvider : IStorageProvider
                 {
                     // 파일에 대한 접근을 비동기적으로 확인
                     using var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true);
-                    await fileStream.ReadAsync((new byte[1]).AsMemory(0, 1));
+                    await fileStream.ReadExactlyAsync((new byte[1]).AsMemory(0, 1));
                 }
                 else
                 {
@@ -135,7 +135,7 @@ internal class LocalStorageProvider : IStorageProvider
         });
     }
 
-    private void CopyDirectory(string sourcePath, string destinationPath)
+    private static void CopyDirectory(string sourcePath, string destinationPath)
     {
         if (!Directory.Exists(destinationPath))
             IOHelper.CreateDirectory(destinationPath);
