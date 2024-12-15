@@ -1,59 +1,112 @@
-﻿using FileMoles.Data;
-using FileMoles.Internal;
-using Microsoft.Extensions.Configuration;
+﻿using System;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using FileMoles.Cache;
+using FileMoles.Core.Interfaces;
+using FileMoles.Monitoring;
+using FileMoles.Core.Models;
+using FileMoles.Security;
+using Microsoft.Extensions.Logging;
 
 namespace FileMoles;
 
 public class FileMoleBuilder
 {
-    private FileMoleOptions _options = new();
+    private readonly IServiceCollection _services;
+    private readonly FileMoleOptions _options;
 
-    public FileMoleBuilder UseConfiguration(IConfiguration configuration)
+    public FileMoleBuilder()
     {
-        configuration.GetSection("FileMole").Bind(_options);
+        _services = new ServiceCollection();
+        _options = new FileMoleOptions();
+    }
+
+    public FileMoleBuilder UseCache(Action<CacheOptions> configure)
+    {
+        configure(_options.Cache);
         return this;
     }
 
-    public FileMoleBuilder AddMole(Mole mole)
+    public FileMoleBuilder UseMonitoring(Action<MonitoringOptions> configure)
     {
-        _options.Moles.Add(mole);
+        configure(_options.Monitoring);
         return this;
     }
 
-    public FileMoleBuilder AddMole(string path, MoleType type = MoleType.Local, string provider = "Default")
+    public FileMoleBuilder ConfigureSecurity(Action<SecurityOptions> configure)
     {
-        return AddMole(new Mole { Path = path, Type = type, Provider = provider });
-    }
-
-    public FileMoleBuilder SetOptions(FileMoleOptions options)
-    {
-        _options = options;
+        configure(_options.Security);
         return this;
     }
 
-    public FileMoleBuilder SetOptions(Action<FileMoleOptions> configureOptions)
+    public FileMoleBuilder ConfigureLogging(Action<ILoggingBuilder> configure)
     {
-        configureOptions(_options);
+        _services.AddLogging(configure);
+        return this;
+    }
+
+    public FileMoleBuilder AddProvider<TProvider>(TProvider provider) where TProvider : class, IStorageProvider
+    {
+        _services.AddSingleton<IStorageProvider>(provider);
+        return this;
+    }
+
+    public FileMoleBuilder AddProvider<TProvider>() where TProvider : class, IStorageProvider
+    {
+        _services.AddSingleton<IStorageProvider, TProvider>();
         return this;
     }
 
     public FileMole Build()
     {
-        var fileMole = new FileMole(_options, ResolveDbContextAsync().Result);
-        return fileMole;
+        ConfigureServices();
+        var serviceProvider = _services.BuildServiceProvider();
+
+        return new FileMole(
+            serviceProvider.GetRequiredService<IFileSystemCache>(),
+        serviceProvider.GetRequiredService<IFileSystemMonitor>(),
+            serviceProvider.GetRequiredService<IFileSystemSecurityManager>(),
+            serviceProvider.GetRequiredService<ILogger<FileMole>>(),
+            serviceProvider.GetServices<IStorageProvider>());
     }
 
-    private async Task<DbContext> ResolveDbContextAsync()
+    private void ConfigureServices()
     {
-        var dataPath = _options.GetDataPath();
-        var dbPath = Path.Combine(dataPath, Constants.DbFileName);
+        // Add options
+        _services.Configure<FileMoleOptions>(_ => _options);
+        _services.Configure<CacheOptions>(_ => _options.Cache);
+        _services.Configure<MonitoringOptions>(_ => _options.Monitoring);
+        _services.Configure<SecurityOptions>(_ => _options.Security);
 
-        if (!Directory.Exists(dataPath))
+        // Configure cache
+        if (_options.Cache.Enabled)
         {
-            Directory.CreateDirectory(dataPath);
+            _services.AddDbContext<CacheDbContext>(options =>
+                options.UseSqlite(_options.Cache.ConnectionString));
+            _services.AddSingleton<IFileSystemCache, ImprovedSqliteFileSystemCache>();
+        }
+        else
+        {
+            _services.AddSingleton<IFileSystemCache, NoOpFileSystemCache>();
         }
 
-        var dbContext = await DbContext.CreateAsync(dbPath);
-        return dbContext;
+        // Configure monitoring
+        if (_options.Monitoring.Enabled)
+        {
+            _services.AddSingleton<IFileSystemMonitor, FileSystemMonitor>();
+        }
+        else
+        {
+            _services.AddSingleton<IFileSystemMonitor, NoOpFileSystemMonitor>();
+        }
+
+        // Configure security
+        _services.AddSingleton<IFileSystemSecurityManager, FileSystemSecurityManager>();
+
+        // Add default services if not configured
+        if (!_services.Any(x => x.ServiceType == typeof(ILogger<>)))
+        {
+            _services.AddLogging(builder => builder.AddConsole());
+        }
     }
 }
